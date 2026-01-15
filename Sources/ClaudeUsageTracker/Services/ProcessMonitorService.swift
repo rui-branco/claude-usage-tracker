@@ -34,7 +34,8 @@ final class ProcessMonitorService: ObservableObject {
 
         // Scan every 5 seconds
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            guard let self = self else { return }
+            Task { @MainActor [weak self] in
                 await self?.scanInBackground()
             }
         }
