@@ -250,6 +250,8 @@ struct MenuBarView: View {
     }
 
     private func openSettings() {
+        AnalyticsService.shared.trackSettingsOpened()
+
         // Try multiple approaches for opening settings
         NSApp.activate(ignoringOtherApps: true)
 

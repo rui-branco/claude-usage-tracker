@@ -46,10 +46,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
 
+        // Initialize analytics
+        AnalyticsService.shared.initialize()
+        AnalyticsService.shared.trackAppLaunched()
+
         // Initialize app state immediately at launch
         Task { @MainActor in
             await AppState.shared.initialize()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AnalyticsService.shared.trackAppTerminated()
     }
 }
 

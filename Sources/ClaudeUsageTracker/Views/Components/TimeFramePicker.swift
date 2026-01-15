@@ -6,7 +6,10 @@ struct TimeFramePicker: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(TimeFrame.allCases) { frame in
-                Button(action: { selection = frame }) {
+                Button(action: {
+                    selection = frame
+                    AnalyticsService.shared.trackTimeFrameChanged(to: frame.rawValue)
+                }) {
                     Text(frame.rawValue)
                         .font(.caption2.bold())
                         .padding(.horizontal, 10)

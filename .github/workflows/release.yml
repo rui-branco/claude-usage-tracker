@@ -21,6 +21,15 @@ jobs:
       with:
         swift-version: '5.9'
 
+    - name: Create Secrets file
+      run: |
+        cat > Sources/ClaudeUsageTracker/Secrets.swift << EOF
+        import Foundation
+        enum Secrets {
+            static let posthogAPIKey = "${{ secrets.POSTHOG_API_KEY }}"
+        }
+        EOF
+
     - name: Build Release
       run: |
         swift build -c release
