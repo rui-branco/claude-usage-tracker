@@ -87,18 +87,6 @@ Claude Usage Tracker reads data from Claude Code's local configuration and cache
 
 The app monitors these files for changes and updates the display automatically.
 
-## Building a Release
-
-To create a distributable app bundle:
-
-```bash
-./scripts/build-release.sh
-```
-
-This creates:
-- `ClaudeUsageTracker.app` - The app bundle
-- `ClaudeUsageTracker.zip` - Ready for GitHub Releases
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
