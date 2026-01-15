@@ -1,0 +1,63 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Swift
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '5.9'
+
+    - name: Build Release
+      run: |
+        swift build -c release
+
+    - name: Create App Bundle
+      run: |
+        mkdir -p ClaudeUsageTracker.app/Contents/MacOS
+        mkdir -p ClaudeUsageTracker.app/Contents/Resources
+        cp .build/release/ClaudeUsageTracker ClaudeUsageTracker.app/Contents/MacOS/
+        cp Info.plist ClaudeUsageTracker.app/Contents/
+        echo -n "APPL????" > ClaudeUsageTracker.app/Contents/PkgInfo
+
+    - name: Create ZIP
+      run: |
+        zip -r ClaudeUsageTracker.zip ClaudeUsageTracker.app
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Claude Usage Tracker ${{ steps.get_version.outputs.VERSION }}
+        body: |
+          ## Installation
+
+          1. Download `ClaudeUsageTracker.zip` below
+          2. Unzip the file
+          3. Move `ClaudeUsageTracker.app` to `/Applications`
+          4. Right-click and select **Open** (first time only)
+
+          See [INSTALL.md](INSTALL.md) for detailed instructions.
+
+          ## Requirements
+          - macOS 13.0 (Ventura) or later
+          - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
+        files: |
+          ClaudeUsageTracker.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
