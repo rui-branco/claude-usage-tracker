@@ -1,12 +1,12 @@
-name: Build and Release
+name: Build Test
 
 on:
   push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
@@ -29,10 +29,9 @@ jobs:
         EOF
 
     - name: Build Release
-      run: |
-        swift build -c release
+      run: swift build -c release
 
-    - name: Create App Bundle
+    - name: Verify App Bundle
       run: |
         mkdir -p ClaudeUsageTracker.app/Contents/MacOS
         mkdir -p ClaudeUsageTracker.app/Contents/Resources
@@ -40,40 +39,4 @@ jobs:
         cp Info.plist ClaudeUsageTracker.app/Contents/
         cp Sources/ClaudeUsageTracker/Resources/AppIcon.icns ClaudeUsageTracker.app/Contents/Resources/
         cp -r .build/release/ClaudeUsageTracker_ClaudeUsageTracker.bundle ClaudeUsageTracker.app/Contents/Resources/
-        echo -n "APPL????" > ClaudeUsageTracker.app/Contents/PkgInfo
-
-    - name: Create ZIP
-      run: |
-        zip -r ClaudeUsageTracker.zip ClaudeUsageTracker.app
-
-    - name: Get version from tag
-      id: get_version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        name: Claude Usage Tracker ${{ steps.get_version.outputs.VERSION }}
-        body: |
-          ## Installation
-
-          1. Download `ClaudeUsageTracker.zip` below
-          2. Unzip the file
-          3. Move `ClaudeUsageTracker.app` to `/Applications`
-          4. Run this command in Terminal to allow the app to open:
-             ```
-             xattr -cr /Applications/ClaudeUsageTracker.app
-             ```
-          5. Open the app from Applications
-
-          See [INSTALL.md](INSTALL.md) for detailed instructions.
-
-          ## Requirements
-          - macOS 13.0 (Ventura) or later
-          - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
-        files: |
-          ClaudeUsageTracker.zip
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        echo "✅ Build and bundle verification successful"
