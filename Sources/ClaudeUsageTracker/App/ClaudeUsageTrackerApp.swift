@@ -33,15 +33,38 @@ struct ClaudeUsageTrackerApp: App {
 struct SessionMenuBarLabel: View {
     @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
+    @State private var refreshTrigger = Date()
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "wand.and.stars")
 
-            if settings.showMenuBarPercentage, let percent = state.sessionPercent {
-                Text("\(percent)%")
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+            if settings.showMenuBarPercentage {
+                if let resetAt = state.fiveHourResetAt, state.sessionPercent ?? 0 >= 100 {
+                    // At 100% - show time until reset
+                    Text(formatTimeUntil(resetAt))
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                } else if let percent = state.sessionPercent {
+                    // Normal - show percentage
+                    Text("\(percent)%")
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                }
             }
+        }
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
+            refreshTrigger = time
+        }
+    }
+
+    private func formatTimeUntil(_ date: Date) -> String {
+        let interval = date.timeIntervalSinceNow
+        if interval <= 0 { return "soon" }
+        let hours = Int(interval) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h\(minutes)m"
+        } else {
+            return "\(minutes)m"
         }
     }
 }
@@ -74,6 +97,7 @@ enum MenuBarAPIType {
 class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
+    @Published var fiveHourResetAt: Date?
     @Published var apiCost: Double?
     @Published var apiType: MenuBarAPIType = .none
 

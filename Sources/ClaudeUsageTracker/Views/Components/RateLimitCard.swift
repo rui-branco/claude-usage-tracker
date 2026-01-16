@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RateLimitCard: View {
     let rateLimit: RateLimitStatus
+    @State private var refreshTrigger = Date()
 
     var body: some View {
         VStack(spacing: 8) {
@@ -11,8 +12,7 @@ struct RateLimitCard: View {
                 percent: rateLimit.fiveHourUsedPercent,
                 resetText: formatTimeUntil(rateLimit.fiveHourResetAt),
                 estimatedTimeToLimit: rateLimit.sessionTimeUntilLimitFormatted,
-                tickCount: 5,
-                limitTimePosition: rateLimit.sessionLimitTimePosition
+                tickCount: 5
             )
 
             // Weekly Limit (7-Day)
@@ -21,9 +21,11 @@ struct RateLimitCard: View {
                 percent: rateLimit.sevenDayUsedPercent,
                 resetText: formatResetDay(rateLimit.sevenDayResetAt),
                 estimatedTimeToLimit: rateLimit.weeklyTimeUntilLimitFormatted,
-                tickCount: 7,
-                limitTimePosition: rateLimit.weeklyLimitTimePosition
+                tickCount: 7
             )
+        }
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
+            refreshTrigger = time
         }
         .padding(12)
         .background(Color(.windowBackgroundColor))
@@ -65,7 +67,6 @@ struct RateLimitBar: View {
     let resetText: String
     var estimatedTimeToLimit: String?
     var tickCount: Int = 0
-    var limitTimePosition: Double?  // Time-based position (0-100% of window)
 
     private var color: Color {
         switch percent {
@@ -109,14 +110,12 @@ struct RateLimitBar: View {
                             }
                         }
 
-                        // Limit time marker (vertical red line showing when limit will be hit)
-                        if let timePos = limitTimePosition {
-                            let markerX = geo.size.width * CGFloat(min(timePos, 100) / 100)
-
+                        // Red line at 100% when limit will be hit before reset
+                        if estimatedTimeToLimit != nil {
                             Rectangle()
                                 .fill(Color.red)
                                 .frame(width: 2, height: 8)
-                                .position(x: markerX, y: 4)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
                 }
@@ -136,7 +135,7 @@ struct RateLimitBar: View {
                     Text(estimate)
                         .font(.system(size: 9))
                 }
-                .foregroundColor(estimateColor)
+                .foregroundColor(.gray)
             }
         }
     }

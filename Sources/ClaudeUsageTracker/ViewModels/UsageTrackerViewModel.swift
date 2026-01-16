@@ -390,6 +390,7 @@ final class UsageTrackerViewModel: ObservableObject {
         guard let cache = cache else {
             rateLimitStatus = nil
             MenuBarState.shared.sessionPercent = nil
+            MenuBarState.shared.fiveHourResetAt = nil
             return
         }
 
@@ -456,8 +457,9 @@ final class UsageTrackerViewModel: ObservableObject {
 
         rateLimitStatus = status
 
-        // Update menu bar percentage
+        // Update menu bar percentage and reset date
         MenuBarState.shared.sessionPercent = cache.data.fiveHour
+        MenuBarState.shared.fiveHourResetAt = fiveHourReset
     }
 
     func refresh() {
@@ -655,6 +657,7 @@ final class UsageTrackerViewModel: ObservableObject {
             let isBedrock: Bool
             let isClaudeAPI: Bool  // Direct Claude API (no service_tier, not Bedrock)
             let isThisMonth: Bool
+            let messageDate: Date?  // For time-based pricing
             let input: Int
             let output: Int
             let cacheCreate: Int
@@ -684,6 +687,7 @@ final class UsageTrackerViewModel: ObservableObject {
                 let isBedrock = messageId.hasPrefix("msg_bdrk_")
 
                 var isThisMonth = false
+                var messageDate: Date?
                 if let timestamp = json["timestamp"] as? String {
                     let formatter = ISO8601DateFormatter()
                     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -694,6 +698,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     }
                     if let date = date {
                         isThisMonth = date >= monthStart
+                        messageDate = date
                     }
                 }
 
@@ -708,6 +713,7 @@ final class UsageTrackerViewModel: ObservableObject {
                         isBedrock: isBedrock,
                         isClaudeAPI: isClaudeAPI,
                         isThisMonth: isThisMonth,
+                        messageDate: messageDate,
                         input: usageData["input_tokens"] as? Int ?? 0,
                         output: usageData["output_tokens"] as? Int ?? 0,
                         cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
@@ -720,6 +726,8 @@ final class UsageTrackerViewModel: ObservableObject {
         }
 
         // Accumulate from globally deduplicated messages
+        let pricingService = PricingService.shared
+
         for (_, entry) in globalMessageMap {
             combinedUsage.model = entry.model
             if entry.isBedrock {
@@ -734,6 +742,17 @@ final class UsageTrackerViewModel: ObservableObject {
             combinedUsage.cacheCreationTokens += entry.cacheCreate
             combinedUsage.cacheReadTokens += entry.cacheRead
 
+            // Calculate cost using pricing for this message's date
+            let messageCost = pricingService.calculateCost(
+                inputTokens: entry.input,
+                outputTokens: entry.output,
+                cacheCreationTokens: entry.cacheCreate,
+                cacheReadTokens: entry.cacheRead,
+                model: entry.model,
+                at: entry.messageDate
+            )
+            combinedUsage.calculatedCost += messageCost
+
             var modelData = combinedUsage.modelUsage[entry.model] ?? ModelUsageData()
             modelData.inputTokens += entry.input
             modelData.outputTokens += entry.output
@@ -746,6 +765,7 @@ final class UsageTrackerViewModel: ObservableObject {
                 combinedUsage.monthlyOutputTokens += entry.output
                 combinedUsage.monthlyCacheCreationTokens += entry.cacheCreate
                 combinedUsage.monthlyCacheReadTokens += entry.cacheRead
+                combinedUsage.calculatedMonthlyCost += messageCost
 
                 var monthlyModelData = combinedUsage.monthlyModelUsage[entry.model] ?? ModelUsageData()
                 monthlyModelData.inputTokens += entry.input
