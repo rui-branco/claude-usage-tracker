@@ -14,6 +14,11 @@ struct MenuBarView: View {
             // Content
             ScrollView {
                 VStack(spacing: 12) {
+                    // API Cost Summary (shows when loading or when user has API/Bedrock projects)
+                    if viewModel.showAPICostCard {
+                        APICostCard(breakdown: viewModel.apiCostBreakdown, isLoading: viewModel.isLoadingAPICosts)
+                    }
+
                     // Rate Limits (at top for subscription users)
                     if settings.showRateLimits, let rateLimit = viewModel.rateLimitStatus {
                         RateLimitCard(rateLimit: rateLimit)
@@ -78,6 +83,7 @@ struct MenuBarView: View {
                     if settings.showRecentProjects {
                         HistorySessionsCard(
                             sessions: viewModel.recentSessions,
+                            allSessions: viewModel.liveSessions,
                             formatTokens: viewModel.formatTokenCount,
                             formatCost: viewModel.formatCost,
                             isExpanded: $viewModel.isHistoryExpanded
@@ -97,7 +103,7 @@ struct MenuBarView: View {
             // Footer
             footerView
         }
-        .frame(width: 320, height: settings.compactMode ? 480 : 580)
+        .frame(width: 320, height: 580)
     }
 
     private var headerView: some View {

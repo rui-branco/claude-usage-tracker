@@ -32,11 +32,11 @@ final class SettingsService: ObservableObject {
     }
 
     // Display Settings
-    @Published var compactMode: Bool {
-        didSet { UserDefaults.standard.set(compactMode, forKey: "compactMode") }
-    }
     @Published var showMenuBarPercentage: Bool {
         didSet { UserDefaults.standard.set(showMenuBarPercentage, forKey: "showMenuBarPercentage") }
+    }
+    @Published var showMenuBarAPICost: Bool {
+        didSet { UserDefaults.standard.set(showMenuBarAPICost, forKey: "showMenuBarAPICost") }
     }
 
     static let shared = SettingsService()
@@ -55,8 +55,8 @@ final class SettingsService: ObservableObject {
             "showModelBreakdown": true,
             "showRecentProjects": true,
             "showAllTimeStats": true,
-            "compactMode": false,
-            "showMenuBarPercentage": true
+            "showMenuBarPercentage": true,
+            "showMenuBarAPICost": true
         ])
 
         self.autoRefreshEnabled = defaults.bool(forKey: "autoRefreshEnabled")
@@ -67,8 +67,8 @@ final class SettingsService: ObservableObject {
         self.showModelBreakdown = defaults.bool(forKey: "showModelBreakdown")
         self.showRecentProjects = defaults.bool(forKey: "showRecentProjects")
         self.showAllTimeStats = defaults.bool(forKey: "showAllTimeStats")
-        self.compactMode = defaults.bool(forKey: "compactMode")
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
+        self.showMenuBarAPICost = defaults.bool(forKey: "showMenuBarAPICost")
     }
 }
 

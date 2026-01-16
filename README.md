@@ -75,7 +75,6 @@ Click the gear icon to customize:
 - Show/hide menu bar percentage
 - Enable/disable auto-refresh
 - Toggle individual sections
-- Switch to compact mode
 
 ## How It Works
 
