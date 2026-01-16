@@ -20,12 +20,73 @@ struct RateLimitStatus {
     let fiveHourResetAt: Date
     let sevenDayResetAt: Date
 
+    // Recent burn rate tracking (calculated from delta since last check)
+    var recentSessionBurnRate: Double?   // % per hour based on recent change
+    var recentWeeklyBurnRate: Double?    // % per hour based on recent change
+
     var fiveHourUsedPercent: Double {
         Double(fiveHourUsed)
     }
 
     var sevenDayUsedPercent: Double {
         Double(sevenDayUsed)
+    }
+
+    /// Projected session usage at reset time based on current burn rate
+    var sessionProjectedPercent: Double? {
+        let windowDuration: TimeInterval = 5 * 3600
+        let timeUntilReset = fiveHourResetAt.timeIntervalSinceNow
+        let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
+
+        guard elapsedInWindow > 60, fiveHourUsedPercent > 0 else { return nil }
+
+        let burnRatePerSecond = fiveHourUsedPercent / elapsedInWindow
+        let projectedAdditional = burnRatePerSecond * max(timeUntilReset, 0)
+        return min(fiveHourUsedPercent + projectedAdditional, 100)
+    }
+
+    /// Projected weekly usage at reset time based on current burn rate
+    var weeklyProjectedPercent: Double? {
+        let windowDuration: TimeInterval = 7 * 24 * 3600
+        let timeUntilReset = sevenDayResetAt.timeIntervalSinceNow
+        let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
+
+        guard elapsedInWindow > 3600, sevenDayUsedPercent > 0 else { return nil }
+
+        let burnRatePerSecond = sevenDayUsedPercent / elapsedInWindow
+        let projectedAdditional = burnRatePerSecond * max(timeUntilReset, 0)
+        return min(sevenDayUsedPercent + projectedAdditional, 100)
+    }
+
+    /// Time-based marker position for weekly (0-100% of 7-day window)
+    /// Shows WHEN the limit will be hit as a position on the timeline
+    var weeklyLimitTimePosition: Double? {
+        guard let hours = weeklyHoursUntilLimit else { return nil }
+
+        let windowDuration: TimeInterval = 7 * 24 * 3600  // 7 days
+        let timeUntilReset = sevenDayResetAt.timeIntervalSinceNow
+        let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
+
+        // Position = elapsed time + time to limit, as % of 7 days
+        let timeToLimitSeconds = hours * 3600
+        let limitPosition = (elapsedInWindow + timeToLimitSeconds) / windowDuration * 100
+
+        return min(limitPosition, 100)
+    }
+
+    /// Time-based marker position for session (0-100% of 5-hour window)
+    var sessionLimitTimePosition: Double? {
+        guard let minutes = sessionMinutesUntilLimit else { return nil }
+
+        let windowDuration: TimeInterval = 5 * 3600  // 5 hours
+        let timeUntilReset = fiveHourResetAt.timeIntervalSinceNow
+        let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
+
+        // Position = elapsed time + time to limit, as % of 5 hours
+        let timeToLimitSeconds = minutes * 60
+        let limitPosition = (elapsedInWindow + timeToLimitSeconds) / windowDuration * 100
+
+        return min(limitPosition, 100)
     }
 
     var status: Status {
@@ -35,6 +96,98 @@ struct RateLimitStatus {
         case 50..<80: return .warning
         default: return .critical
         }
+    }
+
+    /// Estimated time until session limit is reached (in minutes)
+    /// Uses MAX of average rate and recent rate for faster spike detection
+    var sessionMinutesUntilLimit: Double? {
+        let windowDuration: TimeInterval = 5 * 3600  // 5 hours
+        let timeUntilReset = fiveHourResetAt.timeIntervalSinceNow
+        let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
+
+        guard fiveHourUsedPercent > 0 else { return nil }
+
+        // Calculate average rate over entire window
+        var avgBurnRate: Double = 0
+        if elapsedInWindow > 60 {
+            let elapsedHours = elapsedInWindow / 3600.0
+            avgBurnRate = fiveHourUsedPercent / elapsedHours
+        }
+
+        // Use MAX of average rate and recent rate (catches spikes faster)
+        let effectiveRate = max(avgBurnRate, recentSessionBurnRate ?? 0)
+
+        guard effectiveRate > 0 else { return nil }
+
+        let remaining = 100.0 - fiveHourUsedPercent
+        guard remaining > 0 else { return 0 }
+
+        return (remaining / effectiveRate) * 60  // Convert hours to minutes
+    }
+
+    /// Estimated time until weekly limit is reached (in hours)
+    /// Uses MAX of average rate and recent rate for faster spike detection
+    var weeklyHoursUntilLimit: Double? {
+        let windowDuration: TimeInterval = 7 * 24 * 3600  // 7 days
+        let timeUntilReset = sevenDayResetAt.timeIntervalSinceNow
+        let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
+
+        guard sevenDayUsedPercent > 0 else { return nil }
+
+        // Calculate average rate over entire window
+        var avgBurnRate: Double = 0
+        if elapsedInWindow > 3600 {
+            let elapsedHours = elapsedInWindow / 3600.0
+            avgBurnRate = sevenDayUsedPercent / elapsedHours
+        }
+
+        // Use MAX of average rate and recent rate (catches spikes faster)
+        let effectiveRate = max(avgBurnRate, recentWeeklyBurnRate ?? 0)
+
+        guard effectiveRate > 0 else { return nil }
+
+        let remaining = 100.0 - sevenDayUsedPercent
+        guard remaining > 0 else { return 0 }
+
+        return remaining / effectiveRate
+    }
+
+    /// Formatted string for session time until limit
+    /// Only shows if burning WAY too fast (hitting limit well before reset)
+    var sessionTimeUntilLimitFormatted: String? {
+        guard let minutes = sessionMinutesUntilLimit else { return nil }
+
+        let minutesUntilReset = fiveHourResetAt.timeIntervalSinceNow / 60.0
+
+        // Only show if hitting limit before reset (with 5 min buffer for noise)
+        guard minutes < minutesUntilReset - 5 else { return nil }
+
+        if minutes <= 0 { return "At limit!" }
+        if minutes < 60 {
+            return "Limit in ~\(Int(minutes))m!"
+        } else {
+            let hours = minutes / 60
+            return String(format: "Limit in ~%.1fh!", hours)
+        }
+    }
+
+    /// Formatted string for weekly time until limit
+    /// Only shows if burning WAY too fast (hitting limit well before reset)
+    var weeklyTimeUntilLimitFormatted: String? {
+        guard let hours = weeklyHoursUntilLimit else { return nil }
+
+        let hoursUntilReset = sevenDayResetAt.timeIntervalSinceNow / 3600.0
+
+        // Only show if hitting limit before reset (with 30 min buffer for noise)
+        guard hours < hoursUntilReset - 0.5 else { return nil }
+
+        if hours <= 0 { return "At limit!" }
+
+        // Always show day name + time for weekly
+        let limitDate = Date().addingTimeInterval(hours * 3600)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE HH:mm"  // e.g., "Wed 15:30"
+        return "Limit ~\(formatter.string(from: limitDate))"
     }
 
     enum Status {

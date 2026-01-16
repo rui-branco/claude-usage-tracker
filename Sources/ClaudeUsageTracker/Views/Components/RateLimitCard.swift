@@ -11,7 +11,8 @@ struct RateLimitCard: View {
                 percent: rateLimit.fiveHourUsedPercent,
                 resetText: formatTimeUntil(rateLimit.fiveHourResetAt),
                 estimatedTimeToLimit: rateLimit.sessionTimeUntilLimitFormatted,
-                tickCount: 5
+                tickCount: 5,
+                limitTimePosition: rateLimit.sessionLimitTimePosition
             )
 
             // Weekly Limit (7-Day)
@@ -20,7 +21,8 @@ struct RateLimitCard: View {
                 percent: rateLimit.sevenDayUsedPercent,
                 resetText: formatResetDay(rateLimit.sevenDayResetAt),
                 estimatedTimeToLimit: rateLimit.weeklyTimeUntilLimitFormatted,
-                tickCount: 7
+                tickCount: 7,
+                limitTimePosition: rateLimit.weeklyLimitTimePosition
             )
         }
         .padding(12)
@@ -63,6 +65,7 @@ struct RateLimitBar: View {
     let resetText: String
     var estimatedTimeToLimit: String?
     var tickCount: Int = 0
+    var limitTimePosition: Double?  // Time-based position (0-100% of window)
 
     private var color: Color {
         switch percent {
@@ -105,6 +108,16 @@ struct RateLimitBar: View {
                                     .position(x: geo.size.width * CGFloat(i) / CGFloat(tickCount), y: 4)
                             }
                         }
+
+                        // Limit time marker (vertical red line showing when limit will be hit)
+                        if let timePos = limitTimePosition {
+                            let markerX = geo.size.width * CGFloat(min(timePos, 100) / 100)
+
+                            Rectangle()
+                                .fill(Color.red)
+                                .frame(width: 2, height: 8)
+                                .position(x: markerX, y: 4)
+                        }
                     }
                 }
                 .frame(height: 8)
@@ -144,13 +157,19 @@ struct RateLimitBar: View {
     private var estimateColor: Color {
         guard let estimate = estimatedTimeToLimit else { return .secondary }
         if estimate.contains("At limit") { return .red }
-        if estimate.contains("m to") { return .orange }
-        if estimate.contains("h to") {
+        // "Limit in ~30m!" - minutes remaining, urgent
+        if estimate.contains("m!") { return .orange }
+        // "Limit in ~1.5h!" - hours remaining
+        if estimate.contains("h!") {
             if let range = estimate.range(of: "~"),
                let endRange = estimate.range(of: "h"),
                let hours = Double(estimate[range.upperBound..<endRange.lowerBound]) {
                 return hours < 2 ? .orange : .secondary
             }
+        }
+        // "Limit ~Mon!" - days remaining
+        if estimate.contains("Limit ~") && !estimate.contains("in") {
+            return .orange
         }
         return .secondary
     }

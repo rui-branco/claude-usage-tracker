@@ -39,6 +39,11 @@ struct LiveSession: Identifiable {
     let lastCost: Double
     let lastTokens: Int
     let isActive: Bool
+    var apiType: APIType = .subscription  // Only show cost for API types
+
+    var isAPI: Bool {
+        apiType != .subscription
+    }
 }
 
 @MainActor
@@ -56,7 +61,7 @@ final class UsageTrackerViewModel: ObservableObject {
     @Published var sessionCache: SessionCache?
 
     // UI State
-    @Published var isHistoryExpanded = false
+    @Published var isHistoryExpanded = true
     @Published var isModelsExpanded = true
     @Published var isTrendExpanded = true
 
@@ -64,13 +69,122 @@ final class UsageTrackerViewModel: ObservableObject {
     private let processMonitor: ProcessMonitorService
     private var cancellables = Set<AnyCancellable>()
 
+    // Cache file path
+    private let cacheFilePath: String = {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        return "\(homeDir)/.claude/usage-tracker-cache.json"
+    }()
+
     init(fileWatcher: FileWatcherService, processMonitor: ProcessMonitorService) {
         self.fileWatcher = fileWatcher
         self.processMonitor = processMonitor
+
+        // Setup bindings first so observers are ready
         setupBindings()
+
+        // Load cached data (this will trigger the observer to update MenuBarState)
+        loadFromCache()
+
+        // Then update in background
+        updateAPICosts()
+        updateLiveSessions()
+    }
+
+    // MARK: - Disk Cache
+
+    private struct DiskCache: Codable {
+        let sessions: [CachedSession]
+        let bedrockTotal: Double
+        let bedrockMonthly: Double
+        let timestamp: Date
+
+        struct CachedSession: Codable {
+            let id: String
+            let projectName: String
+            let projectPath: String
+            let lastCost: Double
+            let lastTokens: Int
+            let apiType: String
+        }
+    }
+
+    private func loadFromCache() {
+        guard let data = FileManager.default.contents(atPath: cacheFilePath),
+              let cache = try? JSONDecoder().decode(DiskCache.self, from: data) else {
+            return
+        }
+
+        // Load cached sessions
+        cachedLiveSessions = cache.sessions.map { s in
+            LiveSession(
+                id: s.id,
+                projectName: s.projectName,
+                projectPath: s.projectPath,
+                lastCost: s.lastCost,
+                lastTokens: s.lastTokens,
+                isActive: true,
+                apiType: APIType(rawValue: s.apiType) ?? .subscription
+            )
+        }
+
+        // Load cached cost breakdown (Combine observer will update MenuBarState)
+        var breakdown = APICostBreakdown()
+        breakdown.bedrockTotal = cache.bedrockTotal
+        breakdown.bedrockMonthly = cache.bedrockMonthly
+        cachedCostBreakdown = breakdown
+
+        // Mark as loaded (not loading anymore)
+        if cachedCostBreakdown.hasBedrock {
+            isLoadingAPICosts = false
+        }
+    }
+
+    private func saveToCache() {
+        let cache = DiskCache(
+            sessions: cachedLiveSessions.map { s in
+                DiskCache.CachedSession(
+                    id: s.id,
+                    projectName: s.projectName,
+                    projectPath: s.projectPath,
+                    lastCost: s.lastCost,
+                    lastTokens: s.lastTokens,
+                    apiType: s.apiType.rawValue
+                )
+            },
+            bedrockTotal: cachedCostBreakdown.bedrockTotal,
+            bedrockMonthly: cachedCostBreakdown.bedrockMonthly,
+            timestamp: Date()
+        )
+
+        if let data = try? JSONEncoder().encode(cache) {
+            try? data.write(to: URL(fileURLWithPath: cacheFilePath))
+        }
     }
 
     private func setupBindings() {
+        // Sync cachedCostBreakdown to MenuBarState whenever it changes
+        $cachedCostBreakdown
+            .receive(on: DispatchQueue.main)
+            .sink { breakdown in
+                let totalCost = breakdown.totalAll
+                if totalCost > 0 {
+                    MenuBarState.shared.apiCost = totalCost
+                    if breakdown.hasMultiple {
+                        MenuBarState.shared.apiType = .mixed
+                    } else if breakdown.hasBedrock {
+                        MenuBarState.shared.apiType = .bedrock
+                    } else if breakdown.hasClaudeAPI {
+                        MenuBarState.shared.apiType = .claudeAPI
+                    } else {
+                        MenuBarState.shared.apiType = .unknown
+                    }
+                } else {
+                    MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.apiType = .none
+                }
+            }
+            .store(in: &cancellables)
+
         fileWatcher.$statsCache
             .receive(on: DispatchQueue.main)
             .sink { [weak self] stats in
@@ -85,6 +199,10 @@ final class UsageTrackerViewModel: ObservableObject {
                 self?.claudeConfig = config
                 // Re-enrich sessions when config updates
                 self?.refreshEnrichedSessions()
+                // Calculate API costs from transcripts (runs in background)
+                self?.updateAPICosts()
+                // Update live sessions with accurate transcript data
+                self?.updateLiveSessions()
             }
             .store(in: &cancellables)
 
@@ -171,8 +289,10 @@ final class UsageTrackerViewModel: ObservableObject {
 
                         // Check model usage and determine API type
                         if let modelUsage = projectConfig.lastModelUsage {
-                            let (isBedrock, _, _) = calculateSessionCost(modelUsage: modelUsage, inputTokens: inputTokens, outputTokens: outputTokens)
-                            enrichedSessions[i].isBedrock = isBedrock
+                            let (isBedrockModel, _, _) = calculateSessionCost(modelUsage: modelUsage, inputTokens: inputTokens, outputTokens: outputTokens)
+                            if isBedrockModel {
+                                enrichedSessions[i].apiType = .bedrock
+                            }
 
                             // Use actual cost from config (lastCost) when available
                             // This contains the real cost calculated by Claude
@@ -257,6 +377,15 @@ final class UsageTrackerViewModel: ObservableObject {
         return (hasBedrock, totalCost)
     }
 
+    // Track previous values for burn rate calculation
+    private var lastSessionPercent: Int?
+    private var lastWeeklyPercent: Int?
+    private var lastRateLimitUpdate: Date?
+
+    // Smoothed burn rates (exponential moving average)
+    private var smoothedSessionRate: Double = 0
+    private var smoothedWeeklyRate: Double = 0
+
     private func updateRateLimitStatus(from cache: RateLimitCache?) {
         guard let cache = cache else {
             rateLimitStatus = nil
@@ -270,13 +399,62 @@ final class UsageTrackerViewModel: ObservableObject {
         let fiveHourReset = formatter.date(from: cache.data.fiveHourResetAt) ?? Date()
         let sevenDayReset = formatter.date(from: cache.data.sevenDayResetAt) ?? Date()
 
-        rateLimitStatus = RateLimitStatus(
+        // Calculate recent burn rates based on change since last update
+        var recentSessionRate: Double?
+        var recentWeeklyRate: Double?
+
+        if let lastUpdate = lastRateLimitUpdate,
+           let lastSession = lastSessionPercent,
+           let lastWeekly = lastWeeklyPercent {
+
+            let timeDelta = Date().timeIntervalSince(lastUpdate)
+
+            // Only calculate if at least 10 seconds have passed
+            if timeDelta >= 10 {
+                let hoursDelta = timeDelta / 3600.0
+
+                // Session rate: detect if we're in a new window (reset happened)
+                let sessionDelta = cache.data.fiveHour - lastSession
+                if sessionDelta > 0 {
+                    let instantRate = Double(sessionDelta) / hoursDelta
+                    // Exponential smoothing: 70% new, 30% old (reacts fast to spikes)
+                    smoothedSessionRate = 0.7 * instantRate + 0.3 * smoothedSessionRate
+                    recentSessionRate = smoothedSessionRate
+                } else if sessionDelta < 0 {
+                    // Reset happened, clear the rate
+                    smoothedSessionRate = 0
+                }
+
+                // Weekly rate
+                let weeklyDelta = cache.data.sevenDay - lastWeekly
+                if weeklyDelta > 0 {
+                    let instantRate = Double(weeklyDelta) / hoursDelta
+                    smoothedWeeklyRate = 0.7 * instantRate + 0.3 * smoothedWeeklyRate
+                    recentWeeklyRate = smoothedWeeklyRate
+                } else if weeklyDelta < 0 {
+                    smoothedWeeklyRate = 0
+                }
+            }
+        }
+
+        // Update tracking values
+        lastSessionPercent = cache.data.fiveHour
+        lastWeeklyPercent = cache.data.sevenDay
+        lastRateLimitUpdate = Date()
+
+        var status = RateLimitStatus(
             planName: cache.data.planName,
             fiveHourUsed: cache.data.fiveHour,
             sevenDayUsed: cache.data.sevenDay,
             fiveHourResetAt: fiveHourReset,
             sevenDayResetAt: sevenDayReset
         )
+
+        // Pass the recent burn rates
+        status.recentSessionBurnRate = recentSessionRate ?? smoothedSessionRate
+        status.recentWeeklyBurnRate = recentWeeklyRate ?? smoothedWeeklyRate
+
+        rateLimitStatus = status
 
         // Update menu bar percentage
         MenuBarState.shared.sessionPercent = cache.data.fiveHour
@@ -354,24 +532,365 @@ final class UsageTrackerViewModel: ObservableObject {
     // MARK: - Live Sessions
 
     var liveSessions: [LiveSession] {
-        guard let projects = claudeConfig?.projects else { return [] }
-        return projects.compactMap { (path, config) in
-            guard config.lastSessionId != nil else { return nil }
-            let name = URL(fileURLWithPath: path).lastPathComponent
-            let tokens = (config.lastTotalInputTokens ?? 0) + (config.lastTotalOutputTokens ?? 0)
-            return LiveSession(
-                id: config.lastSessionId ?? UUID().uuidString,
-                projectName: name,
-                projectPath: path,
-                lastCost: config.lastCost ?? 0,
-                lastTokens: tokens,
-                isActive: true
-            )
-        }.sorted { $0.lastTokens > $1.lastTokens }
+        cachedLiveSessions
+    }
+
+    @Published private var cachedLiveSessions: [LiveSession] = []
+
+    private var isUpdatingLiveSessions = false
+
+    // Update live sessions with accurate data from transcripts
+    // Scans ALL project directories, not just those in config
+    private func updateLiveSessions() {
+        // Prevent duplicate parallel execution
+        guard !isUpdatingLiveSessions else { return }
+        isUpdatingLiveSessions = true
+
+        Task.detached(priority: .utility) { [weak self] in
+            defer {
+                Task { @MainActor in
+                    self?.isUpdatingLiveSessions = false
+                }
+            }
+            guard let self = self else { return }
+
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            let projectsDir = "\(homeDir)/.claude/projects"
+
+            guard FileManager.default.fileExists(atPath: projectsDir) else {
+                await MainActor.run { self.cachedLiveSessions = [] }
+                return
+            }
+
+            var sessions: [LiveSession] = []
+
+            do {
+                let directories = try FileManager.default.contentsOfDirectory(atPath: projectsDir)
+
+                for dir in directories {
+                    // Skip hidden files
+                    guard !dir.hasPrefix(".") else { continue }
+
+                    let fullDirPath = "\(projectsDir)/\(dir)"
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: fullDirPath, isDirectory: &isDirectory),
+                          isDirectory.boolValue else { continue }
+
+                    // Get project name - extract after "WebstormProjects-" or use last meaningful segment
+                    let projectName: String
+                    if let range = dir.range(of: "WebstormProjects-") {
+                        projectName = String(dir[range.upperBound...])
+                    } else if let range = dir.range(of: "branco-") {
+                        projectName = String(dir[range.upperBound...])
+                    } else {
+                        // Fallback: use last 2-3 components for readability
+                        let components = dir.components(separatedBy: "-")
+                        projectName = components.suffix(3).joined(separator: "-")
+                    }
+
+                    // Parse transcripts directly from directory
+                    let usage = self.parseTranscriptsInDirectory(fullDirPath)
+
+                    // Skip projects with no usage
+                    guard usage.totalTokens > 0 else { continue }
+
+                    // Detect API type from transcript
+                    // Bedrock: msg_bdrk_ message IDs
+                    // Claude API: no service_tier field (direct ANTHROPIC_API_KEY usage)
+                    // Subscription: has service_tier field
+                    let detectedAPIType: APIType
+                    if usage.hasBedrock {
+                        detectedAPIType = .bedrock
+                    } else if usage.hasClaudeAPI {
+                        detectedAPIType = .claudeAPI
+                    } else {
+                        detectedAPIType = .subscription
+                    }
+
+                    // Calculate cost only for paid API projects
+                    let totalCost = usage.isPaidAPI ? usage.calculateCost() : 0
+
+                    sessions.append(LiveSession(
+                        id: dir,
+                        projectName: projectName,
+                        projectPath: dir,
+                        lastCost: totalCost,
+                        lastTokens: usage.totalTokens,
+                        isActive: true,
+                        apiType: detectedAPIType
+                    ))
+                }
+            } catch {
+                // Ignore errors
+            }
+
+            // Sort: API projects first (by cost), then subscription (by tokens)
+            let sorted = sessions.sorted {
+                if $0.isAPI && !$1.isAPI { return true }
+                if !$0.isAPI && $1.isAPI { return false }
+                if $0.isAPI { return $0.lastCost > $1.lastCost }
+                return $0.lastTokens > $1.lastTokens
+            }
+
+            await MainActor.run {
+                self.cachedLiveSessions = sorted
+                self.saveToCache()
+            }
+        }
+    }
+
+    // Parse ALL transcripts in a directory with GLOBAL deduplication by message ID
+    nonisolated private func parseTranscriptsInDirectory(_ directory: String) -> TranscriptUsage {
+        var combinedUsage = TranscriptUsage()
+
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: directory) else {
+            return combinedUsage
+        }
+
+        let jsonlFiles = files.filter { $0.hasSuffix(".jsonl") }
+
+        // Global message deduplication across ALL files
+        struct MessageEntry {
+            let model: String
+            let isBedrock: Bool
+            let isClaudeAPI: Bool  // Direct Claude API (no service_tier, not Bedrock)
+            let isThisMonth: Bool
+            let input: Int
+            let output: Int
+            let cacheCreate: Int
+            let cacheRead: Int
+        }
+        var globalMessageMap: [String: MessageEntry] = [:]
+
+        let calendar = Calendar.current
+        let now = Date()
+        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+
+        for file in jsonlFiles {
+            let fullPath = "\(directory)/\(file)"
+            guard let data = FileManager.default.contents(atPath: fullPath),
+                  let content = String(data: data, encoding: .utf8) else { continue }
+
+            let lines = content.components(separatedBy: "\n")
+            for line in lines {
+                guard !line.isEmpty,
+                      let lineData = line.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                      json["type"] as? String == "assistant",
+                      let message = json["message"] as? [String: Any],
+                      let messageId = message["id"] as? String else { continue }
+
+                let model = message["model"] as? String ?? "unknown"
+                let isBedrock = messageId.hasPrefix("msg_bdrk_")
+
+                var isThisMonth = false
+                if let timestamp = json["timestamp"] as? String {
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    var date = formatter.date(from: timestamp)
+                    if date == nil {
+                        formatter.formatOptions = [.withInternetDateTime]
+                        date = formatter.date(from: timestamp)
+                    }
+                    if let date = date {
+                        isThisMonth = date >= monthStart
+                    }
+                }
+
+                if let usageData = message["usage"] as? [String: Any] {
+                    // Detect direct Claude API: no service_tier and not Bedrock
+                    // Subscription has service_tier: "standard"
+                    let hasServiceTier = usageData["service_tier"] != nil
+                    let isClaudeAPI = !isBedrock && !hasServiceTier
+
+                    let entry = MessageEntry(
+                        model: model,
+                        isBedrock: isBedrock,
+                        isClaudeAPI: isClaudeAPI,
+                        isThisMonth: isThisMonth,
+                        input: usageData["input_tokens"] as? Int ?? 0,
+                        output: usageData["output_tokens"] as? Int ?? 0,
+                        cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
+                        cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
+                    )
+                    // Keep last entry per message ID (has final token count)
+                    globalMessageMap[messageId] = entry
+                }
+            }
+        }
+
+        // Accumulate from globally deduplicated messages
+        for (_, entry) in globalMessageMap {
+            combinedUsage.model = entry.model
+            if entry.isBedrock {
+                combinedUsage.isBedrock = true
+            }
+            if entry.isClaudeAPI {
+                combinedUsage.isClaudeAPI = true
+            }
+
+            combinedUsage.inputTokens += entry.input
+            combinedUsage.outputTokens += entry.output
+            combinedUsage.cacheCreationTokens += entry.cacheCreate
+            combinedUsage.cacheReadTokens += entry.cacheRead
+
+            var modelData = combinedUsage.modelUsage[entry.model] ?? ModelUsageData()
+            modelData.inputTokens += entry.input
+            modelData.outputTokens += entry.output
+            modelData.cacheCreationTokens += entry.cacheCreate
+            modelData.cacheReadTokens += entry.cacheRead
+            combinedUsage.modelUsage[entry.model] = modelData
+
+            if entry.isThisMonth {
+                combinedUsage.monthlyInputTokens += entry.input
+                combinedUsage.monthlyOutputTokens += entry.output
+                combinedUsage.monthlyCacheCreationTokens += entry.cacheCreate
+                combinedUsage.monthlyCacheReadTokens += entry.cacheRead
+
+                var monthlyModelData = combinedUsage.monthlyModelUsage[entry.model] ?? ModelUsageData()
+                monthlyModelData.inputTokens += entry.input
+                monthlyModelData.outputTokens += entry.output
+                monthlyModelData.cacheCreationTokens += entry.cacheCreate
+                monthlyModelData.cacheReadTokens += entry.cacheRead
+                combinedUsage.monthlyModelUsage[entry.model] = monthlyModelData
+            }
+        }
+
+        return combinedUsage
     }
 
     var recentSessions: [LiveSession] {
         Array(liveSessions.prefix(5))
+    }
+
+    // MARK: - API Cost Summary
+
+    private let transcriptParser = TranscriptParser()
+    @Published var cachedCostBreakdown = APICostBreakdown()
+    @Published var isLoadingAPICosts = true  // Start true, set false when done
+
+    var hasAPIProjects: Bool {
+        cachedCostBreakdown.hasBedrock || cachedCostBreakdown.hasClaudeAPI
+    }
+
+    var showAPICostCard: Bool {
+        isLoadingAPICosts || hasAPIProjects
+    }
+
+    var hasBedrockProjects: Bool {
+        cachedCostBreakdown.hasBedrock
+    }
+
+    var hasClaudeAPIProjects: Bool {
+        cachedCostBreakdown.hasClaudeAPI
+    }
+
+    var totalAPICost: Double {
+        cachedCostBreakdown.totalAll
+    }
+
+    var monthlyAPICost: Double {
+        cachedCostBreakdown.totalMonthly
+    }
+
+    var apiCostBreakdown: APICostBreakdown {
+        cachedCostBreakdown
+    }
+
+    private var isUpdatingAPICosts = false
+
+    // Calculate and cache API costs from transcripts
+    // Scans ALL project directories for API usage
+    private func updateAPICosts() {
+        // Prevent duplicate parallel execution
+        guard !isUpdatingAPICosts else { return }
+        isUpdatingAPICosts = true
+
+        Task.detached(priority: .utility) { [weak self] in
+            defer {
+                Task { @MainActor in
+                    self?.isUpdatingAPICosts = false
+                    self?.isLoadingAPICosts = false
+                }
+            }
+            guard let self = self else { return }
+
+            var breakdown = APICostBreakdown()
+
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            let projectsDir = "\(homeDir)/.claude/projects"
+
+            guard FileManager.default.fileExists(atPath: projectsDir) else {
+                await MainActor.run {
+                    self.cachedCostBreakdown = APICostBreakdown()
+                    MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.apiType = .none
+                }
+                return
+            }
+
+            do {
+                let directories = try FileManager.default.contentsOfDirectory(atPath: projectsDir)
+
+                for dir in directories {
+                    guard !dir.hasPrefix(".") else { continue }
+
+                    let fullDirPath = "\(projectsDir)/\(dir)"
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: fullDirPath, isDirectory: &isDirectory),
+                          isDirectory.boolValue else { continue }
+
+                    // Parse all transcripts directly from directory
+                    let usage = self.parseTranscriptsInDirectory(fullDirPath)
+                    guard usage.totalTokens > 0 else { continue }
+
+                    // Only count paid API projects (Bedrock or direct Claude API)
+                    guard usage.isPaidAPI else { continue }
+
+                    let projectTotal = usage.calculateCost()
+                    let projectMonthly = usage.calculateMonthlyCost()
+
+                    // Add to appropriate bucket
+                    if usage.hasBedrock {
+                        breakdown.bedrockTotal += projectTotal
+                        breakdown.bedrockMonthly += projectMonthly
+                    } else if usage.hasClaudeAPI {
+                        breakdown.claudeAPITotal += projectTotal
+                        breakdown.claudeAPIMonthly += projectMonthly
+                    }
+                }
+            } catch {
+                // Ignore errors
+            }
+
+            let finalBreakdown = breakdown
+
+            await MainActor.run {
+                self.cachedCostBreakdown = finalBreakdown
+
+                // Update menu bar with total cost and type
+                let totalCost = finalBreakdown.totalAll
+                if totalCost > 0 {
+                    MenuBarState.shared.apiCost = totalCost
+                    // Set API type
+                    if finalBreakdown.hasMultiple {
+                        MenuBarState.shared.apiType = .mixed
+                    } else if finalBreakdown.hasBedrock {
+                        MenuBarState.shared.apiType = .bedrock
+                    } else if finalBreakdown.hasClaudeAPI {
+                        MenuBarState.shared.apiType = .claudeAPI
+                    } else {
+                        MenuBarState.shared.apiType = .unknown
+                    }
+                } else {
+                    MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.apiType = .none
+                }
+
+                // Save to disk cache
+                self.saveToCache()
+            }
+        }
     }
 
     // MARK: - All Time Stats
