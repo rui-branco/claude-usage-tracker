@@ -48,32 +48,35 @@ struct ClaudeUsageTrackerApp: App {
 struct SessionMenuBarLabel: View {
     @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
-    @State private var refreshTrigger = Date()
+    @State private var currentTime = Date()
 
     var body: some View {
         HStack(spacing: 4) {
             ClaudeMenuIcon()
 
             if settings.showMenuBarPercentage {
-                if let resetAt = state.fiveHourResetAt, state.sessionPercent ?? 0 >= 100 {
-                    // At 100% - show time until reset
+                // Show time until reset only if at 100% AND reset time is in the future
+                if let resetAt = state.fiveHourResetAt,
+                   state.sessionPercent ?? 0 >= 100,
+                   resetAt > currentTime {
+                    // At 100% with future reset - show time until reset
                     Text(formatTimeUntil(resetAt))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 } else if let percent = state.sessionPercent {
-                    // Normal - show percentage
+                    // Normal or reset time passed - show percentage
                     Text("\(percent)%")
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
             }
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
-            refreshTrigger = time
+            currentTime = time
         }
     }
 
     private func formatTimeUntil(_ date: Date) -> String {
         let interval = date.timeIntervalSinceNow
-        if interval <= 0 { return "soon" }
+        if interval <= 0 { return "0m" }
         let hours = Int(interval) / 3600
         let minutes = (Int(interval) % 3600) / 60
         if hours > 0 {
