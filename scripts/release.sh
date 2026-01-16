@@ -18,8 +18,7 @@ echo "🚀 Releasing v$VERSION..."
 sed -i '' "s/<string>[0-9]*\.[0-9]*\.[0-9]*<\/string>/<string>$VERSION<\/string>/g" Info.plist
 echo "✅ Updated Info.plist to v$VERSION"
 
-# Clean and build
-rm -rf .build
+# Build release (incremental, no clean)
 swift build -c release
 echo "✅ Built release"
 
