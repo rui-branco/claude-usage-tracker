@@ -177,18 +177,19 @@ struct RateLimitStatus {
     var sessionTimeUntilLimitFormatted: String? {
         guard let minutes = sessionMinutesUntilLimit else { return nil }
 
-        let minutesUntilReset = fiveHourResetAt.timeIntervalSinceNow / 60.0
-
-        // Only show if hitting limit before reset (with 5 min buffer for noise)
-        guard minutes < minutesUntilReset - 5 else { return nil }
-
         if minutes <= 0 { return "At limit!" }
-        if minutes < 60 {
-            return "Limit in ~\(Int(minutes))m!"
-        } else {
-            let hours = minutes / 60
-            return String(format: "Limit in ~%.1fh!", hours)
-        }
+
+        // Calculate the actual limit date
+        let limitDate = Date().addingTimeInterval(minutes * 60)
+
+        // Only show if hitting limit BEFORE reset (with 5 min buffer)
+        let bufferDate = fiveHourResetAt.addingTimeInterval(-5 * 60)
+        guard limitDate < bufferDate else { return nil }
+
+        // Show day name + time format (consistent with weekly)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE HH:mm"  // e.g., "Fri 22:00"
+        return "Limit ~\(formatter.string(from: limitDate))"
     }
 
     /// Formatted string for weekly time until limit
@@ -196,15 +197,16 @@ struct RateLimitStatus {
     var weeklyTimeUntilLimitFormatted: String? {
         guard let hours = weeklyHoursUntilLimit else { return nil }
 
-        let hoursUntilReset = sevenDayResetAt.timeIntervalSinceNow / 3600.0
-
-        // Only show if hitting limit before reset (with 30 min buffer for noise)
-        guard hours < hoursUntilReset - 0.5 else { return nil }
-
         if hours <= 0 { return "At limit!" }
 
-        // Always show day name + time for weekly
+        // Calculate the actual limit date
         let limitDate = Date().addingTimeInterval(hours * 3600)
+
+        // Only show if hitting limit BEFORE reset (with 30 min buffer)
+        let bufferDate = sevenDayResetAt.addingTimeInterval(-30 * 60)
+        guard limitDate < bufferDate else { return nil }
+
+        // Show day name + time for weekly
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE HH:mm"  // e.g., "Wed 15:30"
         return "Limit ~\(formatter.string(from: limitDate))"
