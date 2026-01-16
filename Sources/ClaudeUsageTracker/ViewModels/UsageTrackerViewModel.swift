@@ -564,12 +564,12 @@ final class UsageTrackerViewModel: ObservableObject {
         isUpdatingLiveSessions = true
 
         Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
             defer {
                 Task { @MainActor in
-                    self?.isUpdatingLiveSessions = false
+                    self.isUpdatingLiveSessions = false
                 }
             }
-            guard let self = self else { return }
 
             let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
             let projectsDir = "\(homeDir)/.claude/projects"
@@ -842,13 +842,13 @@ final class UsageTrackerViewModel: ObservableObject {
         isUpdatingAPICosts = true
 
         Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
             defer {
                 Task { @MainActor in
-                    self?.isUpdatingAPICosts = false
-                    self?.isLoadingAPICosts = false
+                    self.isUpdatingAPICosts = false
+                    self.isLoadingAPICosts = false
                 }
             }
-            guard let self = self else { return }
 
             var breakdown = APICostBreakdown()
 

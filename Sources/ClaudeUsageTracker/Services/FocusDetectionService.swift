@@ -13,8 +13,9 @@ final class FocusDetectionService: ObservableObject {
     func startMonitoring() {
         // Check focus every 1 second
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                self?.detectFocusedTerminal()
+                self.detectFocusedTerminal()
             }
         }
         // Initial check
