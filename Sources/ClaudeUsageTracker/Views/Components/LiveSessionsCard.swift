@@ -123,24 +123,21 @@ struct LiveSessionsCard: View {
                                                 .foregroundColor(.secondary)
                                         }
                                     }
-                                    // Show cost and API/Sub indicator
-                                    HStack(spacing: 4) {
-                                        // Always show cost when available
-                                        if let cost = session.cost, cost > 0 {
-                                            Text(formatCost(cost))
-                                                .font(.caption2)
-                                                .foregroundColor(session.isBedrock ? .orange : .green)
-                                        }
-                                        // Show API/Sub indicator
-                                        if session.isBedrock {
-                                            Text("API")
-                                                .font(.caption2)
-                                                .foregroundColor(.orange)
-                                        } else if isSubscription {
-                                            Text("Sub")
-                                                .font(.caption2)
-                                                .foregroundColor(.blue)
-                                        }
+                                    // Show API/Sub indicator only (no cost)
+                                    if session.isBedrock {
+                                        Text("API")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .foregroundColor(.orange)
+                                            .cornerRadius(3)
+                                    } else if isSubscription {
+                                        Text("Sub")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .foregroundColor(.blue)
+                                            .cornerRadius(3)
                                     }
                                 }
                                 Spacer()
@@ -297,9 +294,11 @@ struct CollapsibleCard<Content: View>: View {
 
 struct HistorySessionsCard: View {
     let sessions: [LiveSession]
+    let allSessions: [LiveSession]  // All sessions for popup
     let formatTokens: (Int) -> String
     let formatCost: (Double) -> String
     @Binding var isExpanded: Bool
+    @State private var showAllProjects = false
 
     var body: some View {
         CollapsibleCard(
@@ -318,21 +317,54 @@ struct HistorySessionsCard: View {
                     ForEach(sessions) { session in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(session.projectName)
-                                    .font(.caption)
-                                    .lineLimit(1)
+                                HStack(spacing: 4) {
+                                    Text(session.projectName)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                    // Show type badge for all projects
+                                    Text(session.apiType.rawValue)
+                                        .font(.system(size: 7, weight: .medium))
+                                        .padding(.horizontal, 3)
+                                        .foregroundColor(session.isAPI ? .orange : .blue)
+                                        .cornerRadius(2)
+                                }
                                 Text(formatTokens(session.lastTokens) + " tokens")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
-                            Text(formatCost(session.lastCost))
-                                .font(.caption.monospacedDigit())
-                                .foregroundColor(.orange)
+                            // Only show cost for API projects
+                            if session.isAPI && session.lastCost > 0 {
+                                Text(formatCost(session.lastCost))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundColor(.orange)
+                            }
                         }
+                    }
+
+                    // Show All button
+                    if allSessions.count > sessions.count {
+                        Button(action: { showAllProjects = true }) {
+                            HStack {
+                                Text("Show All (\(allSessions.count))")
+                                    .font(.caption)
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showAllProjects) {
+            AllProjectsPopup(
+                sessions: allSessions.sorted { $0.lastCost > $1.lastCost },
+                formatTokens: formatTokens,
+                formatCost: formatCost
+            )
         }
     }
 }
