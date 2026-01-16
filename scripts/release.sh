@@ -49,13 +49,12 @@ gh release create "v$VERSION" ClaudeUsageTracker.zip \
   --notes "## Installation
 
 1. Download \`ClaudeUsageTracker.zip\` below
-2. Unzip the file
-3. Move \`ClaudeUsageTracker.app\` to \`/Applications\`
-4. Run this command in Terminal:
+2. Move \`ClaudeUsageTracker.app\` to \`/Applications\`
+3. Run this command in Terminal:
    \`\`\`
    xattr -cr /Applications/ClaudeUsageTracker.app
    \`\`\`
-5. Open the app
+4. Open the app
 
 ## Requirements
 - macOS 13.0 (Ventura) or later"
