@@ -1,8 +1,1 @@
-### Features
--
-
-### Fixes
--
-
-### Improvements
--
+- Minor improvements to release process
