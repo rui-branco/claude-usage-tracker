@@ -113,13 +113,15 @@ final class FileWatcherService: ObservableObject {
 
     private func loadSessionCache() {
         guard let data = fileManager.contents(atPath: sessionCachePath) else {
-            // Session cache might not exist yet
+            NSLog("[DEBUG] Session cache file not found at: %@", sessionCachePath)
             return
         }
         do {
             sessionCache = try JSONDecoder().decode(SessionCache.self, from: data)
+            NSLog("[DEBUG] Session cache loaded: context=%d%%", Int(sessionCache?.contextWindow?.usedPercentage ?? -1))
         } catch {
             lastError = "Parse error: \(error.localizedDescription)"
+            NSLog("[DEBUG] Session cache parse error: %@", error.localizedDescription)
         }
     }
 
