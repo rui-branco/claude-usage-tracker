@@ -520,25 +520,30 @@ final class UsageTrackerViewModel: ObservableObject {
     }
 
     var periodTokensByModel: [(name: String, displayName: String, tokens: Int, color: Color, apiCost: Double)] {
-        var modelTokens: [String: Int] = [:]
-        for day in filteredTokenData {
-            for (model, tokens) in day.tokensByModel {
-                modelTokens[model, default: 0] += tokens
-            }
-        }
-        return modelTokens.map { (model, tokens) in
-            let apiCost = calculateAPIPrice(model: model, totalTokens: tokens)
-            return (model, formatModelName(model), tokens, colorForModel(model), apiCost)
+        // Use statsCache.modelUsage - already has accurate token breakdown, loads instantly
+        guard let usage = statsCache?.modelUsage else { return [] }
+
+        return usage.compactMap { (model, stats) in
+            // Filter out synthetic/unknown models and models with 0 tokens
+            let totalTokens = stats.inputTokens + stats.outputTokens + stats.cacheReadInputTokens + stats.cacheCreationInputTokens
+            guard totalTokens > 0,
+                  !model.lowercased().contains("synthetic"),
+                  model.lowercased().contains("claude") else { return nil }
+
+            let apiCost = calculateAPIPrice(model: model, stats: stats)
+            return (model, formatModelName(model), totalTokens, colorForModel(model), apiCost)
         }.sorted { $0.tokens > $1.tokens }
     }
 
-    /// Calculate estimated API cost using blended input/output rate
-    /// Assumes typical usage pattern: ~75% input tokens, ~25% output tokens
-    private func calculateAPIPrice(model: String, totalTokens: Int) -> Double {
+    /// Calculate API cost using actual token breakdown
+    private func calculateAPIPrice(model: String, stats: ModelUsageStats) -> Double {
         let pricing = PricingService.shared.getPricing(for: model)
-        // Blended rate: 75% input + 25% output (typical Claude usage pattern)
-        let blendedRate = 0.75 * pricing.inputPerMTok + 0.25 * pricing.outputPerMTok
-        return Double(totalTokens) * blendedRate / 1_000_000
+        var cost: Double = 0
+        cost += Double(stats.inputTokens) * pricing.inputPerMTok / 1_000_000
+        cost += Double(stats.outputTokens) * pricing.outputPerMTok / 1_000_000
+        cost += Double(stats.cacheCreationInputTokens) * pricing.cacheWritePerMTok / 1_000_000
+        cost += Double(stats.cacheReadInputTokens) * pricing.cacheReadPerMTok / 1_000_000
+        return cost
     }
 
     // MARK: - Live Sessions
@@ -874,7 +879,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     let usage = self.parseTranscriptsInDirectory(fullDirPath)
                     guard usage.totalTokens > 0 else { continue }
 
-                    // Only count paid API projects (Bedrock or direct Claude API)
+                    // Only count paid API projects for the API cost card
                     guard usage.isPaidAPI else { continue }
 
                     let projectTotal = usage.calculateCost()

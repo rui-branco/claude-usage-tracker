@@ -84,22 +84,20 @@ struct MenuBarView: View {
                             count: viewModel.periodTokensByModel.count,
                             isExpanded: $viewModel.isModelsExpanded
                         ) {
-                            VStack(spacing: 8) {
+                            VStack(spacing: 6) {
                                 ForEach(viewModel.periodTokensByModel, id: \.name) { model in
                                     HStack {
                                         Circle()
                                             .fill(model.color)
-                                            .frame(width: 10, height: 10)
+                                            .frame(width: 8, height: 8)
                                         Text(model.displayName)
                                             .font(.caption)
                                         Spacer()
-                                        VStack(alignment: .trailing, spacing: 2) {
-                                            Text(viewModel.formatTokenCount(model.tokens))
-                                                .font(.caption.monospacedDigit())
-                                            Text(formatAPICost(model.apiCost))
-                                                .font(.caption2.monospacedDigit())
-                                                .foregroundColor(.secondary)
-                                        }
+                                        Text(viewModel.formatTokenCount(model.tokens))
+                                            .font(.caption.monospacedDigit())
+                                        Text("(\(formatAPICost(model.apiCost)))")
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundColor(.secondary)
                                     }
                                 }
                             }
