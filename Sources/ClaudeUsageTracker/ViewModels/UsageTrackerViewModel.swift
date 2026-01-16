@@ -126,8 +126,8 @@ final class UsageTrackerViewModel: ObservableObject {
             planName: "Max",
             fiveHour: fiveHourPercent,
             sevenDay: sevenDayPercent,
-            fiveHourResetAt: usage.fiveHour.resetAt,
-            sevenDayResetAt: usage.sevenDay.resetAt
+            fiveHourResetAt: usage.fiveHour.resetsAt,
+            sevenDayResetAt: usage.sevenDay.resetsAt
         )
         let cache = RateLimitCache(
             data: data,

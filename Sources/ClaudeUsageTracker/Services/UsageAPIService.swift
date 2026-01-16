@@ -21,11 +21,11 @@ final class UsageAPIService: @unchecked Sendable {
 
     struct UsageWindow: Codable {
         let utilization: Double  // 0-100 percentage
-        let resetAt: String      // ISO8601 timestamp
+        let resetsAt: String     // ISO8601 timestamp
 
         enum CodingKeys: String, CodingKey {
             case utilization
-            case resetAt = "reset_at"
+            case resetsAt = "resets_at"
         }
     }
 
@@ -40,7 +40,7 @@ final class UsageAPIService: @unchecked Sendable {
     struct OAuthCredentials: Codable {
         let accessToken: String
         let refreshToken: String?
-        let expiresAt: String?
+        let expiresAt: Int64?  // Unix timestamp in milliseconds
     }
 
     /// Fetch usage data, using cache if fresh
@@ -140,12 +140,10 @@ final class UsageAPIService: @unchecked Sendable {
 
         // Try nested structure first (claudeAiOauth.accessToken)
         if let oauth = credentials.claudeAiOauth {
-            // Check expiration if available
+            // Check expiration if available (timestamp in milliseconds)
             if let expiresAt = oauth.expiresAt {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let expirationDate = formatter.date(from: expiresAt),
-                   expirationDate < Date() {
+                let expirationDate = Date(timeIntervalSince1970: Double(expiresAt) / 1000.0)
+                if expirationDate < Date() {
                     NSLog("[UsageAPI] Token expired")
                     return nil
                 }
