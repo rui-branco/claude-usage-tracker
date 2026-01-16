@@ -298,7 +298,6 @@ struct HistorySessionsCard: View {
     let formatTokens: (Int) -> String
     let formatCost: (Double) -> String
     @Binding var isExpanded: Bool
-    @State private var showAllProjects = false
 
     var body: some View {
         CollapsibleCard(
@@ -344,27 +343,22 @@ struct HistorySessionsCard: View {
 
                     // Show All button
                     if allSessions.count > sessions.count {
-                        Button(action: { showAllProjects = true }) {
-                            HStack {
-                                Text("Show All (\(allSessions.count))")
-                                    .font(.caption)
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.caption2)
-                            }
-                            .foregroundColor(.accentColor)
+                        PopoverAnchorButton(
+                            title: "Show All",
+                            count: allSessions.count
+                        ) { anchorView in
+                            PopoverManager.shared.showAllProjectsPopover(
+                                anchorView: anchorView,
+                                sessions: allSessions.sorted { $0.lastCost > $1.lastCost },
+                                formatTokens: formatTokens,
+                                formatCost: formatCost
+                            )
                         }
-                        .buttonStyle(.plain)
+                        .frame(height: 20)
                         .padding(.top, 4)
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showAllProjects) {
-            AllProjectsPopup(
-                sessions: allSessions.sorted { $0.lastCost > $1.lastCost },
-                formatTokens: formatTokens,
-                formatCost: formatCost
-            )
         }
     }
 }

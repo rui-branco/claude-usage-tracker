@@ -4,7 +4,7 @@ struct AllProjectsPopup: View {
     let sessions: [LiveSession]
     let formatTokens: (Int) -> String
     let formatCost: (Double) -> String
-    @Environment(\.dismiss) private var dismiss
+    var onClose: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,7 +13,7 @@ struct AllProjectsPopup: View {
                 Text("All Projects")
                     .font(.headline)
                 Spacer()
-                Button(action: { dismiss() }) {
+                Button(action: { onClose?() }) {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.secondary)
                 }
