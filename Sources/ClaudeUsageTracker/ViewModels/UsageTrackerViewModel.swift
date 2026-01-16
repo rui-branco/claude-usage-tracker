@@ -519,7 +519,7 @@ final class UsageTrackerViewModel: ObservableObject {
         }
     }
 
-    var periodTokensByModel: [(name: String, displayName: String, tokens: Int, color: Color)] {
+    var periodTokensByModel: [(name: String, displayName: String, tokens: Int, color: Color, apiCost: Double)] {
         var modelTokens: [String: Int] = [:]
         for day in filteredTokenData {
             for (model, tokens) in day.tokensByModel {
@@ -527,8 +527,18 @@ final class UsageTrackerViewModel: ObservableObject {
             }
         }
         return modelTokens.map { (model, tokens) in
-            (model, formatModelName(model), tokens, colorForModel(model))
+            let apiCost = calculateAPIPrice(model: model, totalTokens: tokens)
+            return (model, formatModelName(model), tokens, colorForModel(model), apiCost)
         }.sorted { $0.tokens > $1.tokens }
+    }
+
+    /// Calculate estimated API cost using blended input/output rate
+    /// Assumes typical usage pattern: ~75% input tokens, ~25% output tokens
+    private func calculateAPIPrice(model: String, totalTokens: Int) -> Double {
+        let pricing = PricingService.shared.getPricing(for: model)
+        // Blended rate: 75% input + 25% output (typical Claude usage pattern)
+        let blendedRate = 0.75 * pricing.inputPerMTok + 0.25 * pricing.outputPerMTok
+        return Double(totalTokens) * blendedRate / 1_000_000
     }
 
     // MARK: - Live Sessions
