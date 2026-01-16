@@ -5,7 +5,7 @@ import AppKit
 // Claude icon loaded from bundle PNG
 struct ClaudeMenuIcon: View {
     var body: some View {
-        if let url = Bundle.module.url(forResource: "claude-icon", withExtension: "png"),
+        if let url = ResourceLoader.url(forResource: "claude-icon", withExtension: "png"),
            let nsImage = NSImage(contentsOf: url) {
             nsImage.size = NSSize(width: 16, height: 16)
             return AnyView(Image(nsImage: nsImage))

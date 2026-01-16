@@ -74,7 +74,7 @@ final class PricingService: @unchecked Sendable {
 
     func loadPricing() {
         // Load from bundled resource file
-        guard let url = Bundle.module.url(forResource: "pricing", withExtension: "json"),
+        guard let url = ResourceLoader.url(forResource: "pricing", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let loadedConfig = try? JSONDecoder().decode(PricingConfig.self, from: data) else {
             // Fallback to minimal defaults if resource not found

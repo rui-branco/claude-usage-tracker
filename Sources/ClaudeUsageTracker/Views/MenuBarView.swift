@@ -4,7 +4,7 @@ import AppKit
 // Claude icon for header - loaded from bundle PNG with orange tint
 struct ClaudeHeaderIcon: View {
     private var iconImage: NSImage? {
-        guard let url = Bundle.module.url(forResource: "claude-icon", withExtension: "png"),
+        guard let url = ResourceLoader.url(forResource: "claude-icon", withExtension: "png"),
               let nsImage = NSImage(contentsOf: url) else { return nil }
         nsImage.size = NSSize(width: 18, height: 18)
         nsImage.isTemplate = true  // Makes it tintable
