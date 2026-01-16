@@ -45,26 +45,36 @@ struct ContextWindow: Codable {
         return (totalInputTokens ?? 0) + (totalOutputTokens ?? 0)
     }
 
-    // Estimate cost based on model and tokens (blended rate accounting for cache)
+    // Estimate cost based on model and tokens
+    // Note: Most "input" tokens are actually cache reads (10x cheaper)
+    // We use blended rates calibrated to match /cost output
     func estimatedCost(modelId: String?) -> Double {
-        let totalTok = Double(totalTokens)
+        let inputTok = Double(totalInputTokens ?? 0)
+        let outputTok = Double(totalOutputTokens ?? 0)
 
-        // Blended rate per million tokens (empirically calibrated with cache usage)
-        let blendedRate: Double = {
-            guard let model = modelId?.lowercased() else { return 10.0 }
-            if model.contains("opus-4-5") || model.contains("opus-4.5") {
-                return 24.0  // ~$24/MTok blended for Opus 4.5 with cache
+        // Blended rates per MTok (accounting for ~90% cache reads in typical usage)
+        // Cache read is 10x cheaper than fresh input, so blended input rate is much lower
+        let (inputBlendedRate, outputRate): (Double, Double) = {
+            guard let model = modelId?.lowercased() else { return (2.0, 15.0) }
+            if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus-4_5") {
+                // Opus: $15 input, $1.50 cache read, $75 output
+                // Blended input: ~$2.85/MTok (90% cache at $1.50 + 10% fresh at $15)
+                return (2.85, 75.0)
             } else if model.contains("opus") {
-                return 50.0  // Opus 3
+                return (2.85, 75.0)
             } else if model.contains("sonnet") {
-                return 10.0  // Sonnet
+                // Sonnet: $3 input, $0.30 cache read, $15 output
+                return (0.57, 15.0)
             } else if model.contains("haiku") {
-                return 1.0   // Haiku
+                // Haiku: $1 input, $0.10 cache read, $5 output
+                return (0.19, 5.0)
             }
-            return 10.0
+            return (2.0, 15.0)
         }()
 
-        return totalTok * blendedRate / 1_000_000
+        let inputCost = inputTok * inputBlendedRate / 1_000_000
+        let outputCost = outputTok * outputRate / 1_000_000
+        return inputCost + outputCost
     }
 }
 
