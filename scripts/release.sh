@@ -2,14 +2,29 @@
 set -e
 
 # Release script for Claude Usage Tracker
-# Usage: ./scripts/release.sh 1.3.1
+# Usage: ./scripts/release.sh 1.3.1 "Release notes here"
+# Or:    ./scripts/release.sh 1.3.1 -f release-notes.md
 
 VERSION=$1
+NOTES_ARG=$2
+NOTES_FILE=$3
 
 if [ -z "$VERSION" ]; then
-    echo "Usage: ./scripts/release.sh <version>"
-    echo "Example: ./scripts/release.sh 1.3.1"
+    echo "Usage: ./scripts/release.sh <version> [notes or -f <file>]"
+    echo "Examples:"
+    echo "  ./scripts/release.sh 1.3.1 \"Fix pricing calculation\""
+    echo "  ./scripts/release.sh 1.3.1 -f RELEASE_NOTES.md"
     exit 1
+fi
+
+# Get release notes
+WHATS_NEW=""
+if [ "$NOTES_ARG" = "-f" ] && [ -f "$NOTES_FILE" ]; then
+    WHATS_NEW=$(cat "$NOTES_FILE")
+elif [ -f "RELEASE_NOTES.md" ]; then
+    WHATS_NEW=$(cat "RELEASE_NOTES.md")
+elif [ -n "$NOTES_ARG" ]; then
+    WHATS_NEW="- $NOTES_ARG"
 fi
 
 echo "🚀 Releasing v$VERSION..."
@@ -43,21 +58,25 @@ git add -A
 git commit -m "chore: bump version to $VERSION" || true
 git push
 
-# Create GitHub release
-gh release create "v$VERSION" ClaudeUsageTracker.zip \
-  --title "Claude Usage Tracker v$VERSION" \
-  --notes "## Installation
+# Build release notes
+RELEASE_NOTES="## What's New
+
+$WHATS_NEW
+
+## Installation
 
 1. Download \`ClaudeUsageTracker.zip\` below
 2. Move \`ClaudeUsageTracker.app\` to \`/Applications\`
-3. Run this command in Terminal:
-   \`\`\`
-   xattr -cr /Applications/ClaudeUsageTracker.app
-   \`\`\`
+3. Run: \`xattr -cr /Applications/ClaudeUsageTracker.app\`
 4. Open the app
 
 ## Requirements
 - macOS 13.0 (Ventura) or later"
+
+# Create GitHub release
+gh release create "v$VERSION" ClaudeUsageTracker.zip \
+  --title "Claude Usage Tracker v$VERSION" \
+  --notes "$RELEASE_NOTES"
 
 echo ""
 echo "🎉 Released v$VERSION!"
