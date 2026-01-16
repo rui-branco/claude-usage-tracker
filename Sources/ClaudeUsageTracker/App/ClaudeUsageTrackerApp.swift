@@ -15,16 +15,6 @@ struct ClaudeMenuIcon: View {
     }
 }
 
-// Get unicode circle character based on percentage (works in menu bar text)
-func circleForPercent(_ percent: Int) -> String {
-    switch percent {
-    case 0..<13: return "○"      // empty
-    case 13..<38: return "◔"    // quarter
-    case 38..<63: return "◑"    // half
-    case 63..<88: return "◕"    // three-quarters
-    default: return "●"          // full
-    }
-}
 
 @main
 struct ClaudeUsageTrackerApp: App {
@@ -54,27 +44,25 @@ struct ClaudeUsageTrackerApp: App {
     }
 }
 
-// Session percentage label with icon + circle indicator + percentage text
+// Session percentage label with icon
 struct SessionMenuBarLabel: View {
     @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
     @State private var refreshTrigger = Date()
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             ClaudeMenuIcon()
 
             if settings.showMenuBarPercentage {
                 if let resetAt = state.fiveHourResetAt, state.sessionPercent ?? 0 >= 100 {
-                    // At 100% - show full circle + time until reset
-                    Text("● \(formatTimeUntil(resetAt))")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
-                        .foregroundColor(.red)
+                    // At 100% - show time until reset
+                    Text(formatTimeUntil(resetAt))
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
                 } else if let percent = state.sessionPercent {
-                    // Normal - show circle indicator + percentage
-                    Text("\(circleForPercent(percent)) \(percent)%")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
-                        .foregroundColor(percent >= 80 ? .orange : .primary)
+                    // Normal - show percentage
+                    Text("\(percent)%")
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
             }
         }
