@@ -166,9 +166,9 @@ final class UsageTrackerViewModel: ObservableObject {
         $cachedCostBreakdown
             .receive(on: DispatchQueue.main)
             .sink { breakdown in
-                let totalCost = breakdown.totalAll
-                if totalCost > 0 {
-                    MenuBarState.shared.apiCost = totalCost
+                let monthlyCost = breakdown.totalMonthly
+                if monthlyCost > 0 {
+                    MenuBarState.shared.apiCost = monthlyCost
                     if breakdown.hasMultiple {
                         MenuBarState.shared.apiType = .mixed
                     } else if breakdown.hasBedrock {

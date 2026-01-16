@@ -1,15 +1,24 @@
 import SwiftUI
+import Combine
 
 @main
 struct ClaudeUsageTrackerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var menuBarState = MenuBarState.shared
 
     var body: some Scene {
+        // Main menu bar item with icon and session %
         MenuBarExtra {
             AppContentView()
         } label: {
-            MenuBarLabel(state: menuBarState)
+            SessionMenuBarLabel()
+        }
+        .menuBarExtraStyle(.window)
+
+        // Second menu bar item for API cost (only shows if cost > 0)
+        MenuBarExtra {
+            AppContentView()
+        } label: {
+            CostMenuBarLabel()
         }
         .menuBarExtraStyle(.window)
 
@@ -20,13 +29,15 @@ struct ClaudeUsageTrackerApp: App {
     }
 }
 
-struct MenuBarLabel: View {
-    @ObservedObject var state: MenuBarState
+// Session percentage label with icon
+struct SessionMenuBarLabel: View {
+    @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "wand.and.stars")
+
             if settings.showMenuBarPercentage, let percent = state.sessionPercent {
                 Text("\(percent)%")
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
@@ -35,10 +46,46 @@ struct MenuBarLabel: View {
     }
 }
 
+// API cost label (same icon as session)
+struct CostMenuBarLabel: View {
+    @ObservedObject private var state = MenuBarState.shared
+    @ObservedObject private var settings = SettingsService.shared
+
+    var body: some View {
+        if settings.showMenuBarAPICost, let cost = state.apiCost, cost > 0 {
+            HStack(spacing: 4) {
+                Image(systemName: "wand.and.stars")
+                Text("$\(Int(cost))")
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+            }
+        }
+    }
+}
+
+enum MenuBarAPIType {
+    case none
+    case bedrock
+    case claudeAPI
+    case mixed  // Both Bedrock and Claude API
+    case unknown
+}
+
 @MainActor
 class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
+    @Published var apiCost: Double?
+    @Published var apiType: MenuBarAPIType = .none
+
+    var apiTypeLabel: String {
+        switch apiType {
+        case .none: return ""
+        case .bedrock: return "Bedrock"
+        case .claudeAPI: return "API"
+        case .mixed: return "API+Bedrock"
+        case .unknown: return "API"
+        }
+    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
