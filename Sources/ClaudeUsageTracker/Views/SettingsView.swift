@@ -469,7 +469,7 @@ struct AboutSettingsTab: View {
                 }
                 .padding(.horizontal, 20)
 
-                Text("© 2025 Rui Branco. All rights reserved.")
+                Text("© \(String(Calendar.current.component(.year, from: Date()))) Rui Branco. All rights reserved.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.bottom, 20)
