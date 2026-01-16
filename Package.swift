@@ -19,7 +19,10 @@ let package = Package(
                 .product(name: "PostHog", package: "posthog-ios")
             ],
             path: "Sources/ClaudeUsageTracker",
-            exclude: ["Secrets.swift.example"]
+            exclude: ["Secrets.swift.example"],
+            resources: [
+                .process("Resources/pricing.json")
+            ]
         )
     ]
 )

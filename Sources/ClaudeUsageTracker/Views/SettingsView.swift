@@ -48,6 +48,10 @@ struct PricingSection: View {
 
     var body: some View {
         Section("API Pricing (per 1M tokens)") {
+            Text("Anthropic API & AWS Bedrock (same rates)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
             let opus = pricingService.getPricing(for: "opus")
             let sonnet = pricingService.getPricing(for: "sonnet")
             let haiku = pricingService.getPricing(for: "haiku")
@@ -76,6 +80,13 @@ struct PricingSection: View {
                 }
             }
             .foregroundColor(.secondary)
+
+            let lastUpdated = pricingService.lastUpdated
+            if !lastUpdated.isEmpty {
+                Text("Updated: \(lastUpdated)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }

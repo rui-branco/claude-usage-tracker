@@ -1,0 +1,54 @@
+{
+  "lastUpdated": "2025-01-16",
+  "source": "https://www.anthropic.com/pricing",
+  "history": [
+    {
+      "from": "2025-01-01",
+      "to": null,
+      "models": {
+        "opus": {
+          "inputPerMTok": 15.0,
+          "outputPerMTok": 75.0,
+          "cacheWritePerMTok": 6.0,
+          "cacheReadPerMTok": 0.30
+        },
+        "sonnet": {
+          "inputPerMTok": 3.0,
+          "outputPerMTok": 15.0,
+          "cacheWritePerMTok": 3.75,
+          "cacheReadPerMTok": 0.30
+        },
+        "haiku": {
+          "inputPerMTok": 0.80,
+          "outputPerMTok": 4.0,
+          "cacheWritePerMTok": 1.0,
+          "cacheReadPerMTok": 0.08
+        }
+      }
+    },
+    {
+      "from": "2024-01-01",
+      "to": "2024-12-31",
+      "models": {
+        "opus": {
+          "inputPerMTok": 15.0,
+          "outputPerMTok": 75.0,
+          "cacheWritePerMTok": 18.75,
+          "cacheReadPerMTok": 1.50
+        },
+        "sonnet": {
+          "inputPerMTok": 3.0,
+          "outputPerMTok": 15.0,
+          "cacheWritePerMTok": 3.75,
+          "cacheReadPerMTok": 0.30
+        },
+        "haiku": {
+          "inputPerMTok": 0.25,
+          "outputPerMTok": 1.25,
+          "cacheWritePerMTok": 0.30,
+          "cacheReadPerMTok": 0.03
+        }
+      }
+    }
+  ]
+}

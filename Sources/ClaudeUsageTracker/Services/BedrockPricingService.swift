@@ -1,122 +1,172 @@
 import Foundation
 
-struct BedrockPricing: Codable {
-    var lastUpdated: Date
-    var models: [String: ModelPricing]
-}
-
 struct ModelPricing: Codable {
-    let inputPerMTok: Double   // Price per million input tokens
-    let outputPerMTok: Double  // Price per million output tokens
+    let inputPerMTok: Double      // Price per million input tokens
+    let outputPerMTok: Double     // Price per million output tokens
+    let cacheWritePerMTok: Double // Price per million cache write tokens
+    let cacheReadPerMTok: Double  // Price per million cache read tokens
+
+    init(inputPerMTok: Double, outputPerMTok: Double, cacheWritePerMTok: Double, cacheReadPerMTok: Double) {
+        self.inputPerMTok = inputPerMTok
+        self.outputPerMTok = outputPerMTok
+        self.cacheWritePerMTok = cacheWritePerMTok
+        self.cacheReadPerMTok = cacheReadPerMTok
+    }
 }
 
-@MainActor
-class BedrockPricingService: ObservableObject {
-    static let shared = BedrockPricingService()
+/// A pricing period with date range
+struct PricingPeriod: Codable {
+    let from: String        // ISO date "2024-01-01"
+    let to: String?         // ISO date or null for current
+    let models: [String: ModelPricing]
+}
 
-    @Published var pricing: BedrockPricing?
+/// Pricing config with history for accurate calculations across time
+struct PricingConfig: Codable {
+    var lastUpdated: String
+    var source: String
+    var history: [PricingPeriod]
 
-    private let pricingFileURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("ClaudeUsageTracker", isDirectory: true)
-        try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
-        return appDir.appendingPathComponent("bedrock-pricing.json")
-    }()
+    // Legacy support - single models dict
+    var models: [String: ModelPricing]?
 
-    // Default pricing from Anthropic (Jan 2025)
-    private let defaultPricing: [String: ModelPricing] = [
-        // Claude 3 Haiku
-        "haiku-3": ModelPricing(inputPerMTok: 0.25, outputPerMTok: 1.25),
-        "claude-3-haiku": ModelPricing(inputPerMTok: 0.25, outputPerMTok: 1.25),
+    /// Get the current (most recent) pricing period
+    var currentPricing: [String: ModelPricing] {
+        // Find period with no end date (current)
+        if let current = history.first(where: { $0.to == nil }) {
+            return current.models
+        }
+        // Fallback to most recent by start date
+        if let latest = history.sorted(by: { $0.from > $1.from }).first {
+            return latest.models
+        }
+        // Legacy fallback
+        return models ?? [:]
+    }
+}
 
-        // Claude 3.5/4.5 Haiku
-        "haiku-4": ModelPricing(inputPerMTok: 1.0, outputPerMTok: 5.0),
-        "haiku-4.5": ModelPricing(inputPerMTok: 1.0, outputPerMTok: 5.0),
+/// Pricing service that reads from bundled pricing.json resource
+/// Update Resources/pricing.json to change prices
+final class PricingService: @unchecked Sendable {
+    static let shared = PricingService()
 
-        // Claude Sonnet
-        "sonnet-3.5": ModelPricing(inputPerMTok: 3.0, outputPerMTok: 15.0),
-        "sonnet-4": ModelPricing(inputPerMTok: 3.0, outputPerMTok: 15.0),
-        "sonnet-4.5": ModelPricing(inputPerMTok: 3.0, outputPerMTok: 15.0),
+    private var config: PricingConfig?
 
-        // Claude Opus
-        "opus-4": ModelPricing(inputPerMTok: 15.0, outputPerMTok: 75.0),
-        "opus-4.1": ModelPricing(inputPerMTok: 15.0, outputPerMTok: 75.0),
-        "opus-4.5": ModelPricing(inputPerMTok: 5.0, outputPerMTok: 25.0),
-    ]
+    /// Fallback default config if bundled resource fails to load
+    private var defaultConfig: PricingConfig {
+        PricingConfig(
+            lastUpdated: "2025-01-16",
+            source: "Built-in fallback",
+            history: [
+                PricingPeriod(from: "2024-01-01", to: nil, models: [
+                    "opus": ModelPricing(inputPerMTok: 15, outputPerMTok: 75, cacheWritePerMTok: 6, cacheReadPerMTok: 0.3),
+                    "sonnet": ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3),
+                    "haiku": ModelPricing(inputPerMTok: 0.8, outputPerMTok: 4, cacheWritePerMTok: 1, cacheReadPerMTok: 0.08)
+                ])
+            ],
+            models: nil
+        )
+    }
 
     init() {
         loadPricing()
     }
 
     func loadPricing() {
-        if FileManager.default.fileExists(atPath: pricingFileURL.path) {
-            do {
-                let data = try Data(contentsOf: pricingFileURL)
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                pricing = try decoder.decode(BedrockPricing.self, from: data)
-            } catch {
-                createDefaultPricing()
-            }
-        } else {
-            createDefaultPricing()
+        // Load from bundled resource file
+        guard let url = Bundle.module.url(forResource: "pricing", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let loadedConfig = try? JSONDecoder().decode(PricingConfig.self, from: data) else {
+            // Fallback to minimal defaults if resource not found
+            config = PricingConfig(
+                lastUpdated: "2025-01-16",
+                source: "Built-in fallback",
+                history: [
+                    PricingPeriod(from: "2024-01-01", to: nil, models: [
+                        "opus": ModelPricing(inputPerMTok: 15, outputPerMTok: 75, cacheWritePerMTok: 6, cacheReadPerMTok: 0.3),
+                        "sonnet": ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3),
+                        "haiku": ModelPricing(inputPerMTok: 0.8, outputPerMTok: 4, cacheWritePerMTok: 1, cacheReadPerMTok: 0.08)
+                    ])
+                ],
+                models: nil
+            )
+            return
         }
+        config = loadedConfig
     }
 
-    private func createDefaultPricing() {
-        pricing = BedrockPricing(lastUpdated: Date(), models: defaultPricing)
-        savePricing()
-    }
-
-    func savePricing() {
-        guard let pricing = pricing else { return }
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = .prettyPrinted
-            let data = try encoder.encode(pricing)
-            try data.write(to: pricingFileURL)
-        } catch {
-            print("Failed to save pricing: \(error)")
-        }
-    }
-
-    func getPricing(for model: String) -> (input: Double, output: Double) {
+    /// Get pricing for a model family (opus, sonnet, haiku) at a specific date
+    /// If no date provided, uses current pricing
+    func getPricing(for model: String, at date: Date? = nil) -> ModelPricing {
         let modelLower = model.lowercased()
+        let currentConfig = config ?? defaultConfig
 
-        // Determine model family
-        if modelLower.contains("haiku") {
-            if modelLower.contains("claude-3-haiku") || modelLower.contains("20240307") {
-                return getPricingForKey("haiku-3")
-            }
-            return getPricingForKey("haiku-4.5")
+        // Determine model family key
+        let modelKey: String
+        if modelLower.contains("opus") {
+            modelKey = "opus"
         } else if modelLower.contains("sonnet") {
-            return getPricingForKey("sonnet-4.5")
-        } else if modelLower.contains("opus") {
-            if modelLower.contains("4.5") || modelLower.contains("20251101") {
-                return getPricingForKey("opus-4.5")
+            modelKey = "sonnet"
+        } else if modelLower.contains("haiku") {
+            modelKey = "haiku"
+        } else {
+            modelKey = "sonnet"  // Default
+        }
+
+        // Get pricing for the date
+        let models = getPricingModels(for: date, from: currentConfig)
+        return models[modelKey] ?? defaultConfig.currentPricing[modelKey]!
+    }
+
+    /// Find the pricing period that contains the given date
+    private func getPricingModels(for date: Date?, from config: PricingConfig) -> [String: ModelPricing] {
+        guard let date = date else {
+            return config.currentPricing
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: date)
+
+        // Find matching period
+        for period in config.history {
+            let fromOK = dateString >= period.from
+            let toOK = period.to == nil || dateString <= period.to!
+
+            if fromOK && toOK {
+                return period.models
             }
-            return getPricingForKey("opus-4")
         }
 
-        // Default to Sonnet pricing
-        return getPricingForKey("sonnet-4")
+        // Fallback to current
+        return config.currentPricing
     }
 
-    private func getPricingForKey(_ key: String) -> (input: Double, output: Double) {
-        if let modelPricing = pricing?.models[key] {
-            return (modelPricing.inputPerMTok, modelPricing.outputPerMTok)
-        }
-        if let defaultModel = defaultPricing[key] {
-            return (defaultModel.inputPerMTok, defaultModel.outputPerMTok)
-        }
-        return (3.0, 15.0) // Ultimate fallback
+    /// Calculate total cost for a model usage at a specific date
+    func calculateCost(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheCreationTokens: Int,
+        cacheReadTokens: Int,
+        model: String,
+        at date: Date? = nil
+    ) -> Double {
+        let pricing = getPricing(for: model, at: date)
+
+        var cost: Double = 0
+        cost += Double(inputTokens) * pricing.inputPerMTok / 1_000_000
+        cost += Double(outputTokens) * pricing.outputPerMTok / 1_000_000
+        cost += Double(cacheCreationTokens) * pricing.cacheWritePerMTok / 1_000_000
+        cost += Double(cacheReadTokens) * pricing.cacheReadPerMTok / 1_000_000
+
+        return cost
     }
 
-    func calculateCost(inputTokens: Int, outputTokens: Int, model: String) -> Double {
-        let (inputPrice, outputPrice) = getPricing(for: model)
-        let inputCost = Double(inputTokens) * inputPrice / 1_000_000
-        let outputCost = Double(outputTokens) * outputPrice / 1_000_000
-        return inputCost + outputCost
+    /// Get last updated date from config
+    var lastUpdated: String {
+        config?.lastUpdated ?? ""
     }
 }
+
+// Keep old name for compatibility
+typealias BedrockPricingService = PricingService
