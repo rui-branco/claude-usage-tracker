@@ -40,6 +40,7 @@ jobs:
         mkdir -p ClaudeUsageTracker.app/Contents/Resources
         cp .build/release/ClaudeUsageTracker ClaudeUsageTracker.app/Contents/MacOS/
         cp Info.plist ClaudeUsageTracker.app/Contents/
+        cp Sources/ClaudeUsageTracker/Resources/AppIcon.icns ClaudeUsageTracker.app/Contents/Resources/
         echo -n "APPL????" > ClaudeUsageTracker.app/Contents/PkgInfo
 
     - name: Create ZIP
@@ -60,7 +61,11 @@ jobs:
           1. Download `ClaudeUsageTracker.zip` below
           2. Unzip the file
           3. Move `ClaudeUsageTracker.app` to `/Applications`
-          4. Right-click and select **Open** (first time only)
+          4. Run this command in Terminal to allow the app to open:
+             ```
+             xattr -cr /Applications/ClaudeUsageTracker.app
+             ```
+          5. Open the app from Applications
 
           See [INSTALL.md](INSTALL.md) for detailed instructions.
 

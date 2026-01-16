@@ -41,6 +41,9 @@ cp .build/release/ClaudeUsageTracker "$APP_BUNDLE/Contents/MacOS/"
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 
+# Copy app icon
+cp Sources/ClaudeUsageTracker/Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
+
 # Create PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 

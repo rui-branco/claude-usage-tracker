@@ -11,14 +11,14 @@ Double-click the zip file to extract `ClaudeUsageTracker.app`
 ### Step 3: Move to Applications
 Drag `ClaudeUsageTracker.app` to your `/Applications` folder
 
-### Step 4: First Launch
-Since the app is not signed with an Apple Developer certificate, you need to:
+### Step 4: Allow the App
+Since the app is not signed with an Apple Developer certificate, macOS will block it. Run this command in Terminal:
 
-1. Right-click (or Control-click) on `ClaudeUsageTracker.app`
-2. Select **Open** from the context menu
-3. Click **Open** in the security dialog
+```bash
+xattr -cr /Applications/ClaudeUsageTracker.app
+```
 
-After the first launch, you can open it normally.
+Then open the app normally from Applications.
 
 ### Step 5: Launch at Login (Optional)
 To start the app automatically when you log in:
