@@ -207,9 +207,6 @@ struct APICostCard: View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
             HStack {
-                Image(systemName: "dollarsign.circle.fill")
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundColor(.green)
                 Text("API Cost")
                     .font(.caption.bold())
                 Spacer()
