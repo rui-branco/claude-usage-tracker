@@ -12,7 +12,8 @@ struct RateLimitCard: View {
                 percent: rateLimit.fiveHourUsedPercent,
                 resetText: formatTimeUntil(rateLimit.fiveHourResetAt),
                 estimatedTimeToLimit: rateLimit.sessionTimeUntilLimitFormatted,
-                tickCount: 5
+                tickCount: 5,
+                limitTimePosition: rateLimit.sessionLimitTimePosition
             )
 
             // Weekly Limit (7-Day)
@@ -21,7 +22,8 @@ struct RateLimitCard: View {
                 percent: rateLimit.sevenDayUsedPercent,
                 resetText: formatResetDay(rateLimit.sevenDayResetAt),
                 estimatedTimeToLimit: rateLimit.weeklyTimeUntilLimitFormatted,
-                tickCount: 7
+                tickCount: 7,
+                limitTimePosition: rateLimit.weeklyLimitTimePosition
             )
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
@@ -67,6 +69,7 @@ struct RateLimitBar: View {
     let resetText: String
     var estimatedTimeToLimit: String?
     var tickCount: Int = 0
+    var limitTimePosition: Double?  // 0-100% position on timeline where limit will be hit
 
     private var color: Color {
         switch percent {
@@ -110,12 +113,12 @@ struct RateLimitBar: View {
                             }
                         }
 
-                        // Red line at 100% when limit will be hit before reset
-                        if estimatedTimeToLimit != nil {
+                        // Red line at time position where limit will be hit
+                        if let position = limitTimePosition {
                             Rectangle()
                                 .fill(Color.red)
                                 .frame(width: 2, height: 8)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .position(x: geo.size.width * CGFloat(position / 100), y: 4)
                         }
                     }
                 }

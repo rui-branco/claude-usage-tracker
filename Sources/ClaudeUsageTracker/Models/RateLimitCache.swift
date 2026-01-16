@@ -32,29 +32,45 @@ struct RateLimitStatus {
         Double(sevenDayUsed)
     }
 
-    /// Projected session usage at reset time based on current burn rate
+    /// Projected session usage at reset time using effective burn rate
     var sessionProjectedPercent: Double? {
         let windowDuration: TimeInterval = 5 * 3600
         let timeUntilReset = fiveHourResetAt.timeIntervalSinceNow
         let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
 
-        guard elapsedInWindow > 60, fiveHourUsedPercent > 0 else { return nil }
+        guard fiveHourUsedPercent > 0 else { return nil }
 
-        let burnRatePerSecond = fiveHourUsedPercent / elapsedInWindow
-        let projectedAdditional = burnRatePerSecond * max(timeUntilReset, 0)
+        // Use same effective rate as the time-to-limit calculation
+        var avgBurnRate: Double = 0
+        if elapsedInWindow > 60 {
+            avgBurnRate = fiveHourUsedPercent / (elapsedInWindow / 3600.0)
+        }
+        let effectiveRate = max(avgBurnRate, recentSessionBurnRate ?? 0)
+        guard effectiveRate > 0 else { return nil }
+
+        let hoursUntilReset = timeUntilReset / 3600.0
+        let projectedAdditional = effectiveRate * max(hoursUntilReset, 0)
         return min(fiveHourUsedPercent + projectedAdditional, 100)
     }
 
-    /// Projected weekly usage at reset time based on current burn rate
+    /// Projected weekly usage at reset time using effective burn rate
     var weeklyProjectedPercent: Double? {
         let windowDuration: TimeInterval = 7 * 24 * 3600
         let timeUntilReset = sevenDayResetAt.timeIntervalSinceNow
         let elapsedInWindow = windowDuration - max(timeUntilReset, 0)
 
-        guard elapsedInWindow > 3600, sevenDayUsedPercent > 0 else { return nil }
+        guard sevenDayUsedPercent > 0 else { return nil }
 
-        let burnRatePerSecond = sevenDayUsedPercent / elapsedInWindow
-        let projectedAdditional = burnRatePerSecond * max(timeUntilReset, 0)
+        // Use same effective rate as the time-to-limit calculation
+        var avgBurnRate: Double = 0
+        if elapsedInWindow > 3600 {
+            avgBurnRate = sevenDayUsedPercent / (elapsedInWindow / 3600.0)
+        }
+        let effectiveRate = max(avgBurnRate, recentWeeklyBurnRate ?? 0)
+        guard effectiveRate > 0 else { return nil }
+
+        let hoursUntilReset = timeUntilReset / 3600.0
+        let projectedAdditional = effectiveRate * max(hoursUntilReset, 0)
         return min(sevenDayUsedPercent + projectedAdditional, 100)
     }
 
