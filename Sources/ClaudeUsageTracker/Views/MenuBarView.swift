@@ -146,19 +146,14 @@ struct MenuBarView: View {
 
             Spacer()
 
-            // Plan badge and status
-            HStack(spacing: 6) {
-                if let rateLimit = viewModel.rateLimitStatus {
-                    Text(rateLimit.planName)
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.2))
-                        .cornerRadius(4)
-                }
-                Circle()
-                    .fill(viewModel.statusColor)
-                    .frame(width: 10, height: 10)
+            // Plan badge
+            if let rateLimit = viewModel.rateLimitStatus {
+                Text(rateLimit.planName)
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.2))
+                    .cornerRadius(4)
             }
         }
         .padding()
