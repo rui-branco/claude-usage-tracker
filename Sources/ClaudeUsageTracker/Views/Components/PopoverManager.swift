@@ -48,11 +48,13 @@ final class PopoverManager {
         // Store reference
         popover = newPopover
 
-        // Show to the right of the anchor view
+        // Determine best edge based on available screen space
+        let preferredEdge = bestEdgeForPopover(anchorView: anchorView, popoverWidth: 400)
+
         newPopover.show(
             relativeTo: anchorView.bounds,
             of: anchorView,
-            preferredEdge: .maxX  // Right side
+            preferredEdge: preferredEdge
         )
     }
 
@@ -66,6 +68,34 @@ final class PopoverManager {
     /// Returns whether a popover is currently shown
     var isPopoverShown: Bool {
         popover?.isShown ?? false
+    }
+
+    /// Determines the best edge for the popover based on available screen space
+    private func bestEdgeForPopover(anchorView: NSView, popoverWidth: CGFloat) -> NSRectEdge {
+        guard let window = anchorView.window,
+              let screen = window.screen ?? NSScreen.main else {
+            return .maxX  // Default to right
+        }
+
+        // Get the anchor view's position in screen coordinates
+        let anchorFrameInWindow = anchorView.convert(anchorView.bounds, to: nil)
+        let anchorFrameOnScreen = window.convertToScreen(anchorFrameInWindow)
+
+        let screenFrame = screen.visibleFrame
+
+        // Calculate available space on each side
+        let spaceOnRight = screenFrame.maxX - anchorFrameOnScreen.maxX
+        let spaceOnLeft = anchorFrameOnScreen.minX - screenFrame.minX
+
+        // Prefer right side if there's enough space, otherwise use left
+        if spaceOnRight >= popoverWidth {
+            return .maxX
+        } else if spaceOnLeft >= popoverWidth {
+            return .minX
+        } else {
+            // If neither side has enough space, use whichever has more
+            return spaceOnRight >= spaceOnLeft ? .maxX : .minX
+        }
     }
 }
 
