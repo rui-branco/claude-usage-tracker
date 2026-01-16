@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Service to fetch rate limit usage from Anthropic API
 final class UsageAPIService: @unchecked Sendable {
@@ -102,22 +101,33 @@ final class UsageAPIService: @unchecked Sendable {
         return nil
     }
 
-    /// Read token from macOS Keychain
+    /// Read token from macOS Keychain using security CLI (avoids permission prompt)
     private func getTokenFromKeychain() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
 
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let jsonString = String(data: data, encoding: .utf8) else {
-            NSLog("[UsageAPI] Failed to read keychain: %d", status)
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            NSLog("[UsageAPI] Failed to run security command: %@", error.localizedDescription)
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else {
+            NSLog("[UsageAPI] security command failed with status: %d", process.terminationStatus)
+            return nil
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let jsonString = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !jsonString.isEmpty else {
+            NSLog("[UsageAPI] Empty keychain data")
             return nil
         }
 
@@ -140,18 +150,11 @@ final class UsageAPIService: @unchecked Sendable {
                     return nil
                 }
             }
-            NSLog("[UsageAPI] Got token from keychain (nested)")
             return oauth.accessToken
         }
 
         // Fallback to flat structure
-        if let token = credentials.accessToken {
-            NSLog("[UsageAPI] Got token from keychain (flat)")
-            return token
-        }
-
-        NSLog("[UsageAPI] No access token found in keychain")
-        return nil
+        return credentials.accessToken
     }
 
     /// Read token from ~/.claude/.credentials.json
