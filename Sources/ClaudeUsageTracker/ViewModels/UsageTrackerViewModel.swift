@@ -657,7 +657,16 @@ final class UsageTrackerViewModel: ObservableObject {
     }
 
     // Parse ALL transcripts in a directory with GLOBAL deduplication by message ID
+    // Uses caching to avoid re-parsing unchanged directories
     nonisolated private func parseTranscriptsInDirectory(_ directory: String) -> TranscriptUsage {
+        let cacheService = TranscriptCacheService.shared
+
+        // Check cache first
+        if let cached = cacheService.getCached(directory: directory) {
+            return cacheService.toTranscriptUsage(cached)
+        }
+
+        // Parse fresh
         var combinedUsage = TranscriptUsage()
 
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: directory) else {
@@ -790,6 +799,9 @@ final class UsageTrackerViewModel: ObservableObject {
                 combinedUsage.monthlyModelUsage[entry.model] = monthlyModelData
             }
         }
+
+        // Cache the result for future use
+        cacheService.cacheDirectory(directory: directory, usage: combinedUsage)
 
         return combinedUsage
     }
@@ -924,6 +936,9 @@ final class UsageTrackerViewModel: ObservableObject {
 
                 // Save to disk cache
                 self.saveToCache()
+
+                // Save transcript cache
+                TranscriptCacheService.shared.saveCache()
             }
         }
     }
