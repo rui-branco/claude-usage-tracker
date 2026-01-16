@@ -41,6 +41,7 @@ jobs:
         cp .build/release/ClaudeUsageTracker ClaudeUsageTracker.app/Contents/MacOS/
         cp Info.plist ClaudeUsageTracker.app/Contents/
         cp Sources/ClaudeUsageTracker/Resources/AppIcon.icns ClaudeUsageTracker.app/Contents/Resources/
+        cp -r .build/release/ClaudeUsageTracker_ClaudeUsageTracker.bundle ClaudeUsageTracker.app/Contents/Resources/
         echo -n "APPL????" > ClaudeUsageTracker.app/Contents/PkgInfo
 
     - name: Create ZIP
