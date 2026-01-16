@@ -388,6 +388,9 @@ struct DataSettingsTab: View {
 // MARK: - About Tab
 
 struct AboutSettingsTab: View {
+    @ObservedObject private var updateService = UpdateService.shared
+    @ObservedObject private var settings = SettingsService.shared
+
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     private let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
 
@@ -415,8 +418,29 @@ struct AboutSettingsTab: View {
                 }
                 .padding(.top, 20)
 
+                // Update Available Banner
+                if updateService.updateAvailable {
+                    UpdateAvailableView(updateService: updateService)
+                        .padding(.horizontal, 20)
+                }
+
                 Divider()
                     .padding(.horizontal, 40)
+
+                // Updates Section
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Check for updates automatically", isOn: $settings.checkForUpdatesAutomatically)
+
+                        Divider()
+
+                        UpdateCheckButton(updateService: updateService, settings: settings)
+                    }
+                    .padding(4)
+                } label: {
+                    Label("Updates", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .padding(.horizontal, 20)
 
                 // Description
                 Text("Track your Claude API usage, monitor rate limits, and analyze your productivity with detailed statistics and insights.")
@@ -473,6 +497,19 @@ struct AboutSettingsTab: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.bottom, 20)
+            }
+        }
+        .onAppear {
+            // Check for updates when About tab appears (if auto-check enabled and not checked recently)
+            if settings.checkForUpdatesAutomatically {
+                let shouldCheck = settings.lastUpdateCheck == nil ||
+                    Date().timeIntervalSince(settings.lastUpdateCheck!) > 86400
+                if shouldCheck {
+                    Task {
+                        await updateService.checkForUpdates()
+                        settings.lastUpdateCheck = Date()
+                    }
+                }
             }
         }
     }

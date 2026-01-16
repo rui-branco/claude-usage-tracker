@@ -131,6 +131,8 @@ class MenuBarState: ObservableObject {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var windowObserver: Any?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
@@ -142,6 +144,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize app state immediately at launch
         Task { @MainActor in
             await AppState.shared.initialize()
+        }
+
+        // Check for updates on launch (if enabled, throttled to every 24 hours)
+        Task { @MainActor in
+            let settings = SettingsService.shared
+            if settings.checkForUpdatesAutomatically {
+                let shouldCheck = settings.lastUpdateCheck == nil ||
+                    Date().timeIntervalSince(settings.lastUpdateCheck!) > 86400
+                if shouldCheck {
+                    let _ = await UpdateService.shared.checkForUpdates()
+                    settings.lastUpdateCheck = Date()
+                }
+            }
+        }
+
+        // Observe window appearances to configure settings window
+        windowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.configureSettingsWindow(notification)
+        }
+    }
+
+    private func configureSettingsWindow(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+
+        // Settings tab names from SettingsTab enum
+        let settingsTabTitles = ["Account", "General", "Appearance", "Data & Storage", "About"]
+
+        // Check if this is the settings window (by title matching a tab name)
+        if settingsTabTitles.contains(window.title) ||
+           window.identifier?.rawValue.contains("settings") == true {
+            // Remove minimize and zoom buttons, keep only close
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
+            // Prevent resizing
+            window.styleMask.remove(.resizable)
         }
     }
 

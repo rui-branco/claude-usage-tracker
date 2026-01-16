@@ -76,6 +76,14 @@ final class SettingsService: ObservableObject {
         didSet { UserDefaults.standard.set(enableAnalytics, forKey: "enableAnalytics") }
     }
 
+    // MARK: - Update Settings
+    @Published var checkForUpdatesAutomatically: Bool {
+        didSet { UserDefaults.standard.set(checkForUpdatesAutomatically, forKey: "checkForUpdatesAutomatically") }
+    }
+    @Published var lastUpdateCheck: Date? {
+        didSet { UserDefaults.standard.set(lastUpdateCheck, forKey: "lastUpdateCheck") }
+    }
+
     static let shared = SettingsService()
 
     init() {
@@ -108,7 +116,9 @@ final class SettingsService: ObservableObject {
             "monthlyCostAlertThreshold": 100.0,
             // Data
             "cacheRetentionDays": 90,
-            "enableAnalytics": true
+            "enableAnalytics": true,
+            // Updates
+            "checkForUpdatesAutomatically": true
         ])
 
         // Load values
@@ -137,6 +147,9 @@ final class SettingsService: ObservableObject {
 
         self.cacheRetentionDays = defaults.integer(forKey: "cacheRetentionDays")
         self.enableAnalytics = defaults.bool(forKey: "enableAnalytics")
+
+        self.checkForUpdatesAutomatically = defaults.bool(forKey: "checkForUpdatesAutomatically")
+        self.lastUpdateCheck = defaults.object(forKey: "lastUpdateCheck") as? Date
     }
 
     // MARK: - Cache Management
@@ -193,6 +206,8 @@ final class SettingsService: ObservableObject {
         monthlyCostAlertThreshold = 100.0
         cacheRetentionDays = 90
         enableAnalytics = true
+        checkForUpdatesAutomatically = true
+        lastUpdateCheck = nil
     }
 }
 
