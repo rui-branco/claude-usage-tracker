@@ -41,8 +41,9 @@ struct RateLimitStatus {
         guard fiveHourUsedPercent > 0 else { return nil }
 
         // Use same effective rate as the time-to-limit calculation
+        // Require at least 15 minutes elapsed for meaningful average
         var avgBurnRate: Double = 0
-        if elapsedInWindow > 60 {
+        if elapsedInWindow > 900 {
             avgBurnRate = fiveHourUsedPercent / (elapsedInWindow / 3600.0)
         }
         let effectiveRate = max(avgBurnRate, recentSessionBurnRate ?? 0)
@@ -62,8 +63,9 @@ struct RateLimitStatus {
         guard sevenDayUsedPercent > 0 else { return nil }
 
         // Use same effective rate as the time-to-limit calculation
+        // Require at least 4 hours elapsed for meaningful weekly average
         var avgBurnRate: Double = 0
-        if elapsedInWindow > 3600 {
+        if elapsedInWindow > 14400 {
             avgBurnRate = sevenDayUsedPercent / (elapsedInWindow / 3600.0)
         }
         let effectiveRate = max(avgBurnRate, recentWeeklyBurnRate ?? 0)
@@ -124,8 +126,9 @@ struct RateLimitStatus {
         guard fiveHourUsedPercent > 0 else { return nil }
 
         // Calculate average rate over entire window
+        // Require at least 15 minutes elapsed for meaningful average (avoid early spike false alarms)
         var avgBurnRate: Double = 0
-        if elapsedInWindow > 60 {
+        if elapsedInWindow > 900 {
             let elapsedHours = elapsedInWindow / 3600.0
             avgBurnRate = fiveHourUsedPercent / elapsedHours
         }
@@ -151,8 +154,9 @@ struct RateLimitStatus {
         guard sevenDayUsedPercent > 0 else { return nil }
 
         // Calculate average rate over entire window
+        // Require at least 4 hours elapsed for meaningful weekly average (avoid early spike false alarms)
         var avgBurnRate: Double = 0
-        if elapsedInWindow > 3600 {
+        if elapsedInWindow > 14400 {
             let elapsedHours = elapsedInWindow / 3600.0
             avgBurnRate = sevenDayUsedPercent / elapsedHours
         }
