@@ -88,6 +88,53 @@ final class UsageTrackerViewModel: ObservableObject {
         // Then update in background
         updateAPICosts()
         updateLiveSessions()
+
+        // Fetch rate limit usage from API
+        fetchUsageFromAPI()
+
+        // Set up periodic refresh of usage data (every 60 seconds)
+        setupUsageRefreshTimer()
+    }
+
+    private var usageRefreshTimer: Timer?
+
+    private func setupUsageRefreshTimer() {
+        usageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.fetchUsageFromAPI()
+            }
+        }
+    }
+
+    private func fetchUsageFromAPI() {
+        Task {
+            do {
+                let usage = try await UsageAPIService.shared.fetchUsage()
+                updateRateLimitFromAPI(usage)
+            } catch {
+                NSLog("[UsageAPI] Failed to fetch: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    private func updateRateLimitFromAPI(_ usage: UsageAPIService.UsageResponse) {
+        let fiveHourPercent = Int(min(max(usage.fiveHour.utilization, 0), 100))
+        let sevenDayPercent = Int(min(max(usage.sevenDay.utilization, 0), 100))
+
+        // Create RateLimitCache to reuse existing logic
+        let data = RateLimitData(
+            planName: "Max",
+            fiveHour: fiveHourPercent,
+            sevenDay: sevenDayPercent,
+            fiveHourResetAt: usage.fiveHour.resetAt,
+            sevenDayResetAt: usage.sevenDay.resetAt
+        )
+        let cache = RateLimitCache(
+            data: data,
+            timestamp: Int(Date().timeIntervalSince1970)
+        )
+
+        updateRateLimitStatus(from: cache)
     }
 
     // MARK: - Disk Cache
@@ -465,6 +512,8 @@ final class UsageTrackerViewModel: ObservableObject {
     func refresh() {
         isLoading = true
         fileWatcher.refresh()
+        fetchUsageFromAPI()
+        UsageAPIService.shared.clearCache()  // Force fresh fetch
         isLoading = false
     }
 
