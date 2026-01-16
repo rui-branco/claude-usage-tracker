@@ -1,4 +1,27 @@
 import SwiftUI
+import AppKit
+
+// Claude icon for header - loaded from bundle PNG with orange tint
+struct ClaudeHeaderIcon: View {
+    private var iconImage: NSImage? {
+        guard let url = Bundle.module.url(forResource: "claude-icon", withExtension: "png"),
+              let nsImage = NSImage(contentsOf: url) else { return nil }
+        nsImage.size = NSSize(width: 18, height: 18)
+        nsImage.isTemplate = true  // Makes it tintable
+        return nsImage
+    }
+
+    var body: some View {
+        if let nsImage = iconImage {
+            Image(nsImage: nsImage)
+                .foregroundColor(.orange)
+        } else {
+            Image(systemName: "asterisk")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.orange)
+        }
+    }
+}
 
 struct MenuBarView: View {
     @ObservedObject var viewModel: UsageTrackerViewModel
@@ -110,8 +133,7 @@ struct MenuBarView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .foregroundColor(.accentColor)
+                    ClaudeHeaderIcon()
                     Text("Claude Usage")
                         .font(.headline)
                 }

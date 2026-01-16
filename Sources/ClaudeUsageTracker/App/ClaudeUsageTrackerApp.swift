@@ -1,5 +1,30 @@
 import SwiftUI
 import Combine
+import AppKit
+
+// Claude icon loaded from bundle PNG
+struct ClaudeMenuIcon: View {
+    var body: some View {
+        if let url = Bundle.module.url(forResource: "claude-icon", withExtension: "png"),
+           let nsImage = NSImage(contentsOf: url) {
+            nsImage.size = NSSize(width: 16, height: 16)
+            return AnyView(Image(nsImage: nsImage))
+        } else {
+            return AnyView(Image(systemName: "asterisk"))
+        }
+    }
+}
+
+// Get unicode circle character based on percentage (works in menu bar text)
+func circleForPercent(_ percent: Int) -> String {
+    switch percent {
+    case 0..<13: return "○"      // empty
+    case 13..<38: return "◔"    // quarter
+    case 38..<63: return "◑"    // half
+    case 63..<88: return "◕"    // three-quarters
+    default: return "●"          // full
+    }
+}
 
 @main
 struct ClaudeUsageTrackerApp: App {
@@ -29,25 +54,27 @@ struct ClaudeUsageTrackerApp: App {
     }
 }
 
-// Session percentage label with icon
+// Session percentage label with icon + circle indicator + percentage text
 struct SessionMenuBarLabel: View {
     @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
     @State private var refreshTrigger = Date()
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "wand.and.stars")
+        HStack(spacing: 2) {
+            ClaudeMenuIcon()
 
             if settings.showMenuBarPercentage {
                 if let resetAt = state.fiveHourResetAt, state.sessionPercent ?? 0 >= 100 {
-                    // At 100% - show time until reset
-                    Text(formatTimeUntil(resetAt))
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    // At 100% - show full circle + time until reset
+                    Text("● \(formatTimeUntil(resetAt))")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundColor(.red)
                 } else if let percent = state.sessionPercent {
-                    // Normal - show percentage
-                    Text("\(percent)%")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    // Normal - show circle indicator + percentage
+                    Text("\(circleForPercent(percent)) \(percent)%")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundColor(percent >= 80 ? .orange : .primary)
                 }
             }
         }
@@ -77,7 +104,7 @@ struct CostMenuBarLabel: View {
     var body: some View {
         if settings.showMenuBarAPICost, let cost = state.apiCost, cost > 0 {
             HStack(spacing: 4) {
-                Image(systemName: "wand.and.stars")
+                ClaudeMenuIcon()
                 Text("$\(Int(cost))")
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
             }
