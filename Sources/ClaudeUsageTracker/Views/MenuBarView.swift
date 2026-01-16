@@ -93,9 +93,13 @@ struct MenuBarView: View {
                                         Text(model.displayName)
                                             .font(.caption)
                                         Spacer()
-                                        Text(viewModel.formatTokenCount(model.tokens))
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundColor(.secondary)
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            Text(viewModel.formatTokenCount(model.tokens))
+                                                .font(.caption.monospacedDigit())
+                                            Text(formatAPICost(model.apiCost))
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundColor(.secondary)
+                                        }
                                     }
                                 }
                             }
@@ -270,6 +274,12 @@ struct MenuBarView: View {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter
+    }
+
+    private func formatAPICost(_ cost: Double) -> String {
+        if cost < 0.01 { return "<$0.01" }
+        if cost < 1 { return String(format: "$%.2f", cost) }
+        return String(format: "$%.0f", cost)
     }
 
     private func openSettings() {
