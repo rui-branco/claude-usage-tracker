@@ -136,7 +136,7 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     ClaudeHeaderIcon()
-                    Text("Claude Usage")
+                    Text("Claude Usage Tracker")
                         .font(.headline)
                 }
                 if let updated = viewModel.lastUpdated {
