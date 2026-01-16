@@ -35,7 +35,7 @@ struct CachedModelUsage: Codable {
 
 /// Cache for all project directories
 struct TranscriptCache: Codable {
-    var version: Int = 2
+    var version: Int = 3  // Bumped to force recalculation after pricing update (Jan 2026)
     /// Map of directory path -> cached data
     var directories: [String: CachedDirectoryData] = [:]
     var lastUpdated: Date = Date()
@@ -62,7 +62,7 @@ final class TranscriptCacheService: @unchecked Sendable {
     private func loadCache() {
         guard let data = fileManager.contents(atPath: cacheFilePath),
               let loaded = try? JSONDecoder().decode(TranscriptCache.self, from: data),
-              loaded.version == 2 else {
+              loaded.version == 3 else {
             return
         }
         cache = loaded

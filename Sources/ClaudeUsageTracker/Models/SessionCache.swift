@@ -55,21 +55,29 @@ struct ContextWindow: Codable {
         // Blended rates per MTok (accounting for ~90% cache reads in typical usage)
         // Cache read is 10x cheaper than fresh input, so blended input rate is much lower
         let (inputBlendedRate, outputRate): (Double, Double) = {
-            guard let model = modelId?.lowercased() else { return (2.0, 15.0) }
-            if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus-4_5") {
-                // Opus: $15 input, $1.50 cache read, $75 output
+            guard let model = modelId?.lowercased() else { return (0.57, 15.0) }
+            if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus_4_5") {
+                // Opus 4.5: $5 input, $0.50 cache read, $25 output
+                // Blended input: ~$0.95/MTok (90% cache at $0.50 + 10% fresh at $5)
+                return (0.95, 25.0)
+            } else if model.contains("opus") {
+                // Opus 4/4.1: $15 input, $1.50 cache read, $75 output
                 // Blended input: ~$2.85/MTok (90% cache at $1.50 + 10% fresh at $15)
                 return (2.85, 75.0)
-            } else if model.contains("opus") {
-                return (2.85, 75.0)
+            } else if model.contains("haiku-4-5") || model.contains("haiku-4.5") || model.contains("haiku_4_5") {
+                // Haiku 4.5: $1 input, $0.10 cache read, $5 output
+                // Blended input: ~$0.19/MTok (90% cache at $0.10 + 10% fresh at $1)
+                return (0.19, 5.0)
+            } else if model.contains("haiku") {
+                // Haiku 3.5: $0.80 input, $0.08 cache read, $4 output
+                // Blended input: ~$0.152/MTok (90% cache at $0.08 + 10% fresh at $0.80)
+                return (0.152, 4.0)
             } else if model.contains("sonnet") {
                 // Sonnet: $3 input, $0.30 cache read, $15 output
+                // Blended input: ~$0.57/MTok (90% cache at $0.30 + 10% fresh at $3)
                 return (0.57, 15.0)
-            } else if model.contains("haiku") {
-                // Haiku: $1 input, $0.10 cache read, $5 output
-                return (0.19, 5.0)
             }
-            return (2.0, 15.0)
+            return (0.57, 15.0)
         }()
 
         let inputCost = inputTok * inputBlendedRate / 1_000_000

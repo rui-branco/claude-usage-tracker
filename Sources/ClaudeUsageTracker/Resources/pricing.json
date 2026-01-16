@@ -1,16 +1,85 @@
 {
-  "lastUpdated": "2025-01-16",
-  "source": "https://www.anthropic.com/pricing",
+  "lastUpdated": "2026-01-16",
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
   "history": [
     {
-      "from": "2025-01-01",
+      "from": "2025-11-24",
       "to": null,
+      "comment": "Opus 4.5 released Nov 24, 2025. Current pricing period.",
+      "models": {
+        "opus-4-5": {
+          "inputPerMTok": 5.0,
+          "outputPerMTok": 25.0,
+          "cacheWritePerMTok": 6.25,
+          "cacheReadPerMTok": 0.50
+        },
+        "opus": {
+          "inputPerMTok": 15.0,
+          "outputPerMTok": 75.0,
+          "cacheWritePerMTok": 18.75,
+          "cacheReadPerMTok": 1.50
+        },
+        "sonnet": {
+          "inputPerMTok": 3.0,
+          "outputPerMTok": 15.0,
+          "cacheWritePerMTok": 3.75,
+          "cacheReadPerMTok": 0.30
+        },
+        "haiku-4-5": {
+          "inputPerMTok": 1.0,
+          "outputPerMTok": 5.0,
+          "cacheWritePerMTok": 1.25,
+          "cacheReadPerMTok": 0.10
+        },
+        "haiku": {
+          "inputPerMTok": 0.80,
+          "outputPerMTok": 4.0,
+          "cacheWritePerMTok": 1.0,
+          "cacheReadPerMTok": 0.08
+        }
+      }
+    },
+    {
+      "from": "2025-10-01",
+      "to": "2025-11-23",
+      "comment": "Haiku 4.5 released Oct 2025, before Opus 4.5",
       "models": {
         "opus": {
           "inputPerMTok": 15.0,
           "outputPerMTok": 75.0,
-          "cacheWritePerMTok": 6.0,
+          "cacheWritePerMTok": 18.75,
+          "cacheReadPerMTok": 1.50
+        },
+        "sonnet": {
+          "inputPerMTok": 3.0,
+          "outputPerMTok": 15.0,
+          "cacheWritePerMTok": 3.75,
           "cacheReadPerMTok": 0.30
+        },
+        "haiku-4-5": {
+          "inputPerMTok": 1.0,
+          "outputPerMTok": 5.0,
+          "cacheWritePerMTok": 1.25,
+          "cacheReadPerMTok": 0.10
+        },
+        "haiku": {
+          "inputPerMTok": 0.80,
+          "outputPerMTok": 4.0,
+          "cacheWritePerMTok": 1.0,
+          "cacheReadPerMTok": 0.08
+        }
+      }
+    },
+    {
+      "from": "2025-05-22",
+      "to": "2025-09-30",
+      "comment": "Opus 4 and Sonnet 4 released May 22, 2025",
+      "models": {
+        "opus": {
+          "inputPerMTok": 15.0,
+          "outputPerMTok": 75.0,
+          "cacheWritePerMTok": 18.75,
+          "cacheReadPerMTok": 1.50
         },
         "sonnet": {
           "inputPerMTok": 3.0,
@@ -27,8 +96,34 @@
       }
     },
     {
-      "from": "2024-01-01",
-      "to": "2024-12-31",
+      "from": "2024-12-03",
+      "to": "2025-05-21",
+      "comment": "Haiku 3.5 price increase to $0.80/$4.00 on Dec 3, 2024",
+      "models": {
+        "opus": {
+          "inputPerMTok": 15.0,
+          "outputPerMTok": 75.0,
+          "cacheWritePerMTok": 18.75,
+          "cacheReadPerMTok": 1.50
+        },
+        "sonnet": {
+          "inputPerMTok": 3.0,
+          "outputPerMTok": 15.0,
+          "cacheWritePerMTok": 3.75,
+          "cacheReadPerMTok": 0.30
+        },
+        "haiku": {
+          "inputPerMTok": 0.80,
+          "outputPerMTok": 4.0,
+          "cacheWritePerMTok": 1.0,
+          "cacheReadPerMTok": 0.08
+        }
+      }
+    },
+    {
+      "from": "2024-03-04",
+      "to": "2024-12-02",
+      "comment": "Claude 3 family released Mar 4, 2024. Original Haiku 3 pricing.",
       "models": {
         "opus": {
           "inputPerMTok": 15.0,

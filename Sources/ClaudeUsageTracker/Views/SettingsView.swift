@@ -554,13 +554,14 @@ struct PricingSection: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
 
-                let opus = pricingService.getPricing(for: "opus")
+                // Use specific model versions for current pricing
+                let opus = pricingService.getPricing(for: "opus-4-5")
                 let sonnet = pricingService.getPricing(for: "sonnet")
-                let haiku = pricingService.getPricing(for: "haiku")
+                let haiku = pricingService.getPricing(for: "haiku-4-5")
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Opus:")
+                        Text("Opus 4.5:")
                             .font(.caption.bold())
                         Spacer()
                         Text("in $\(opus.inputPerMTok, specifier: "%.0f") / out $\(opus.outputPerMTok, specifier: "%.0f")")
@@ -574,10 +575,10 @@ struct PricingSection: View {
                             .font(.caption.monospacedDigit())
                     }
                     HStack {
-                        Text("Haiku:")
+                        Text("Haiku 4.5:")
                             .font(.caption.bold())
                         Spacer()
-                        Text("in $\(haiku.inputPerMTok, specifier: "%.1f") / out $\(haiku.outputPerMTok, specifier: "%.0f")")
+                        Text("in $\(haiku.inputPerMTok, specifier: "%.0f") / out $\(haiku.outputPerMTok, specifier: "%.0f")")
                             .font(.caption.monospacedDigit())
                     }
                 }

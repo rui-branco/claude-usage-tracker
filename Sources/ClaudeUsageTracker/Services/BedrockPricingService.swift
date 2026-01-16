@@ -55,12 +55,14 @@ final class PricingService: @unchecked Sendable {
     /// Fallback default config if bundled resource fails to load
     private var defaultConfig: PricingConfig {
         PricingConfig(
-            lastUpdated: "2025-01-16",
+            lastUpdated: "2026-01-16",
             source: "Built-in fallback",
             history: [
-                PricingPeriod(from: "2024-01-01", to: nil, models: [
-                    "opus": ModelPricing(inputPerMTok: 15, outputPerMTok: 75, cacheWritePerMTok: 6, cacheReadPerMTok: 0.3),
+                PricingPeriod(from: "2025-11-24", to: nil, models: [
+                    "opus-4-5": ModelPricing(inputPerMTok: 5, outputPerMTok: 25, cacheWritePerMTok: 6.25, cacheReadPerMTok: 0.5),
+                    "opus": ModelPricing(inputPerMTok: 15, outputPerMTok: 75, cacheWritePerMTok: 18.75, cacheReadPerMTok: 1.5),
                     "sonnet": ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3),
+                    "haiku-4-5": ModelPricing(inputPerMTok: 1, outputPerMTok: 5, cacheWritePerMTok: 1.25, cacheReadPerMTok: 0.1),
                     "haiku": ModelPricing(inputPerMTok: 0.8, outputPerMTok: 4, cacheWritePerMTok: 1, cacheReadPerMTok: 0.08)
                 ])
             ],
@@ -78,44 +80,51 @@ final class PricingService: @unchecked Sendable {
               let data = try? Data(contentsOf: url),
               let loadedConfig = try? JSONDecoder().decode(PricingConfig.self, from: data) else {
             // Fallback to minimal defaults if resource not found
-            config = PricingConfig(
-                lastUpdated: "2025-01-16",
-                source: "Built-in fallback",
-                history: [
-                    PricingPeriod(from: "2024-01-01", to: nil, models: [
-                        "opus": ModelPricing(inputPerMTok: 15, outputPerMTok: 75, cacheWritePerMTok: 6, cacheReadPerMTok: 0.3),
-                        "sonnet": ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3),
-                        "haiku": ModelPricing(inputPerMTok: 0.8, outputPerMTok: 4, cacheWritePerMTok: 1, cacheReadPerMTok: 0.08)
-                    ])
-                ],
-                models: nil
-            )
+            config = defaultConfig
             return
         }
         config = loadedConfig
     }
 
-    /// Get pricing for a model family (opus, sonnet, haiku) at a specific date
+    /// Get pricing for a model (with version support) at a specific date
     /// If no date provided, uses current pricing
+    /// Checks for specific model versions (e.g., opus-4-5) before falling back to family (e.g., opus)
     func getPricing(for model: String, at date: Date? = nil) -> ModelPricing {
         let modelLower = model.lowercased()
         let currentConfig = config ?? defaultConfig
 
-        // Determine model family key
-        let modelKey: String
-        if modelLower.contains("opus") {
-            modelKey = "opus"
-        } else if modelLower.contains("sonnet") {
-            modelKey = "sonnet"
-        } else if modelLower.contains("haiku") {
-            modelKey = "haiku"
-        } else {
-            modelKey = "sonnet"  // Default
-        }
-
         // Get pricing for the date
         let models = getPricingModels(for: date, from: currentConfig)
-        return models[modelKey] ?? defaultConfig.currentPricing[modelKey]!
+
+        // Check for specific model versions first, then fall back to family
+        let modelKey: String
+        let fallbackKey: String
+
+        if modelLower.contains("opus-4-5") || modelLower.contains("opus-4.5") || modelLower.contains("opus_4_5") {
+            modelKey = "opus-4-5"
+            fallbackKey = "opus"
+        } else if modelLower.contains("opus") {
+            modelKey = "opus"
+            fallbackKey = "opus"
+        } else if modelLower.contains("haiku-4-5") || modelLower.contains("haiku-4.5") || modelLower.contains("haiku_4_5") {
+            modelKey = "haiku-4-5"
+            fallbackKey = "haiku"
+        } else if modelLower.contains("haiku") {
+            modelKey = "haiku"
+            fallbackKey = "haiku"
+        } else if modelLower.contains("sonnet") {
+            modelKey = "sonnet"
+            fallbackKey = "sonnet"
+        } else {
+            modelKey = "sonnet"  // Default
+            fallbackKey = "sonnet"
+        }
+
+        // Try specific model key first, then fallback to family key
+        if let pricing = models[modelKey] {
+            return pricing
+        }
+        return models[fallbackKey] ?? defaultConfig.currentPricing[fallbackKey]!
     }
 
     /// Find the pricing period that contains the given date
