@@ -24,6 +24,7 @@ struct LiveClaudeSession: Identifiable, Equatable {
     var contextPercent: Double?
     var modelName: String?
     var isRealtime: Bool = false  // Has real-time data from session cache
+    var isOrphaned: Bool = false  // Detached from terminal (??)
 
     // Backwards compatibility
     var isBedrock: Bool {
@@ -112,6 +113,9 @@ final class ProcessMonitorService: ObservableObject {
                   let cpu = Double(components[2]),
                   let memKB = Int(components[5]) else { continue }
 
+            // Check if orphaned (detached from terminal - TTY is "??")
+            let tty = String(components[6])
+            let isOrphaned = tty == "??"
 
             // Get project path from working directory
             let projectPath = getWorkingDirectory(for: pid)
@@ -127,7 +131,8 @@ final class ProcessMonitorService: ObservableObject {
                 projectName: projectName,
                 cpuUsage: cpu,
                 memoryMB: memKB / 1024,
-                apiType: apiType
+                apiType: apiType,
+                isOrphaned: isOrphaned
             )
             sessions.append(session)
         }
@@ -222,5 +227,40 @@ final class ProcessMonitorService: ObservableObject {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             await scanInBackground()
         }
+    }
+
+    func killOrphanedSessions() {
+        let orphaned = liveSessions.filter { $0.isOrphaned }
+        guard !orphaned.isEmpty else { return }
+
+        // Build list of PIDs to kill
+        let pids = orphaned.map { String($0.pid) }.joined(separator: " ")
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = ["-c", "kill -9 \(pids)"]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            print("Failed to kill orphaned processes: \(error)")
+        }
+
+        // Refresh after a short delay
+        Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await scanInBackground()
+        }
+    }
+
+    var orphanedCount: Int {
+        liveSessions.filter { $0.isOrphaned }.count
+    }
+
+    var orphanedMemoryMB: Int {
+        liveSessions.filter { $0.isOrphaned }.reduce(0) { $0 + $1.memoryMB }
     }
 }

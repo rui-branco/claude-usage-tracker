@@ -521,6 +521,18 @@ final class UsageTrackerViewModel: ObservableObject {
         processMonitor.killSession(session)
     }
 
+    func killOrphanedSessions() {
+        processMonitor.killOrphanedSessions()
+    }
+
+    var orphanedSessionCount: Int {
+        liveClaudeSessions.filter { $0.isOrphaned }.count
+    }
+
+    var orphanedMemoryMB: Int {
+        liveClaudeSessions.filter { $0.isOrphaned }.reduce(0) { $0 + $1.memoryMB }
+    }
+
     var liveSessionCount: Int {
         liveClaudeSessions.count
     }

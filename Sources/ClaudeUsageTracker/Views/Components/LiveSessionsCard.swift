@@ -5,11 +5,15 @@ struct LiveSessionsCard: View {
     var isLoading: Bool = false
     var isSubscription: Bool = true  // true = show tokens, false = show cost (Bedrock/API)
     var currentSession: SessionCache?  // Real-time session data
+    var orphanedCount: Int = 0
+    var orphanedMemoryMB: Int = 0
     var onKillSession: ((LiveClaudeSession) -> Void)?
+    var onKillOrphaned: (() -> Void)?
 
     @State private var sessionToKill: LiveClaudeSession?
     @State private var killingSession: LiveClaudeSession?
     @State private var hoveredSession: String?
+    @State private var confirmKillOrphaned: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -182,6 +186,59 @@ struct LiveSessionsCard: View {
                                 hoveredSession = isHovered ? session.id : nil
                             }
                         }
+                    }
+                }
+
+                // Kill orphaned button - full width at bottom
+                if orphanedCount > 0 {
+                    Divider()
+                        .padding(.top, 4)
+
+                    if confirmKillOrphaned {
+                        HStack {
+                            Text("Kill \(orphanedCount) orphaned sessions?")
+                                .font(.caption)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Button("Yes") {
+                                onKillOrphaned?()
+                                confirmKillOrphaned = false
+                            }
+                            .font(.caption.bold())
+                            .foregroundColor(.red)
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 8)
+
+                            Button("No") {
+                                confirmKillOrphaned = false
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(6)
+                    } else {
+                        Button(action: { confirmKillOrphaned = true }) {
+                            HStack {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                Text("Kill \(orphanedCount) orphaned")
+                                    .font(.caption)
+                                Spacer()
+                                Text("\(orphanedMemoryMB) MB")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .background(Color.orange.opacity(0.15))
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.orange)
                     }
                 }
             }

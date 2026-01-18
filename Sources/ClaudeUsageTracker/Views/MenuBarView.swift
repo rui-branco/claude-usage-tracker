@@ -54,8 +54,13 @@ struct MenuBarView: View {
                             isLoading: viewModel.isLoadingSessions,
                             isSubscription: viewModel.rateLimitStatus != nil,
                             currentSession: viewModel.sessionCache,
+                            orphanedCount: viewModel.orphanedSessionCount,
+                            orphanedMemoryMB: viewModel.orphanedMemoryMB,
                             onKillSession: { session in
                                 viewModel.killSession(session)
+                            },
+                            onKillOrphaned: {
+                                viewModel.killOrphanedSessions()
                             }
                         )
                     }
