@@ -33,6 +33,9 @@ final class SettingsService: ObservableObject {
     @Published var showAllTimeStats: Bool {
         didSet { UserDefaults.standard.set(showAllTimeStats, forKey: "showAllTimeStats") }
     }
+    @Published var showAPICost: Bool {
+        didSet { UserDefaults.standard.set(showAPICost, forKey: "showAPICost") }
+    }
 
     // MARK: - Display Settings
     @Published var showMenuBarPercentage: Bool {
@@ -102,6 +105,7 @@ final class SettingsService: ObservableObject {
             "showModelBreakdown": true,
             "showRecentProjects": true,
             "showAllTimeStats": true,
+            "showAPICost": true,
             // Display
             "showMenuBarPercentage": true,
             "showMenuBarAPICost": true,
@@ -132,6 +136,7 @@ final class SettingsService: ObservableObject {
         self.showModelBreakdown = defaults.bool(forKey: "showModelBreakdown")
         self.showRecentProjects = defaults.bool(forKey: "showRecentProjects")
         self.showAllTimeStats = defaults.bool(forKey: "showAllTimeStats")
+        self.showAPICost = defaults.bool(forKey: "showAPICost")
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
         self.showMenuBarAPICost = defaults.bool(forKey: "showMenuBarAPICost")
@@ -194,6 +199,7 @@ final class SettingsService: ObservableObject {
         showModelBreakdown = true
         showRecentProjects = true
         showAllTimeStats = true
+        showAPICost = true
         showMenuBarPercentage = true
         showMenuBarAPICost = true
         compactMode = false

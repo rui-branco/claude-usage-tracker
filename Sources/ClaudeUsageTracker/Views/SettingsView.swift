@@ -251,6 +251,7 @@ struct AppearanceSettingsTab: View {
             }
 
             Section {
+                Toggle("API Cost", isOn: $settings.showAPICost)
                 Toggle("Live Sessions", isOn: $settings.showLiveSessions)
                 Toggle("Rate Limits", isOn: $settings.showRateLimits)
                 Toggle("Activity Trend", isOn: $settings.showTrendChart)

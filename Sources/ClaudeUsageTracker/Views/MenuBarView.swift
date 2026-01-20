@@ -38,7 +38,7 @@ struct MenuBarView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     // API Cost Summary (shows when loading or when user has API/Bedrock projects)
-                    if viewModel.showAPICostCard {
+                    if settings.showAPICost && viewModel.showAPICostCard {
                         APICostCard(breakdown: viewModel.apiCostBreakdown, isLoading: viewModel.isLoadingAPICosts)
                     }
 
