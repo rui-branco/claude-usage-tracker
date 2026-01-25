@@ -10,6 +10,8 @@ struct CachedDirectoryData: Codable {
     let monthKey: String
     /// Day key for daily data (YYYY-MM-DD)
     let dayKey: String?
+    /// Session costs file modification time when cached
+    let sessionCostsModTime: Date?
 
     // Aggregated usage data
     let inputTokens: Int
@@ -42,7 +44,7 @@ struct CachedModelUsage: Codable {
 
 /// Cache for all project directories
 struct TranscriptCache: Codable {
-    var version: Int = 4  // Bumped to add daily cost tracking
+    var version: Int = 5  // Bumped to add session-costs.json tracking
     /// Map of directory path -> cached data
     var directories: [String: CachedDirectoryData] = [:]
     var lastUpdated: Date = Date()
@@ -69,7 +71,7 @@ final class TranscriptCacheService: @unchecked Sendable {
     private func loadCache() {
         guard let data = fileManager.contents(atPath: cacheFilePath),
               let loaded = try? JSONDecoder().decode(TranscriptCache.self, from: data),
-              loaded.version == 4 else {
+              loaded.version == 5 else {
             return
         }
         cache = loaded
@@ -98,6 +100,21 @@ final class TranscriptCacheService: @unchecked Sendable {
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
+    }
+
+    /// Path to session-costs.json (real costs from Claude Code status line)
+    private var sessionCostsPath: String {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        return "\(homeDir)/.claude/session-costs.json"
+    }
+
+    /// Get session-costs.json modification time
+    func getSessionCostsModTime() -> Date? {
+        guard let attrs = try? fileManager.attributesOfItem(atPath: sessionCostsPath),
+              let modDate = attrs[.modificationDate] as? Date else {
+            return nil
+        }
+        return modDate
     }
 
     /// Get directory info: latest file modification and file count
@@ -153,6 +170,18 @@ final class TranscriptCacheService: @unchecked Sendable {
             return true
         }
 
+        // Re-parse if session-costs.json was updated (real costs may have changed)
+        if let currentCostsModTime = getSessionCostsModTime() {
+            if let cachedCostsModTime = cached.sessionCostsModTime {
+                if currentCostsModTime > cachedCostsModTime {
+                    return true
+                }
+            } else {
+                // Session costs file exists but wasn't tracked in cache
+                return true
+            }
+        }
+
         return false
     }
 
@@ -175,6 +204,7 @@ final class TranscriptCacheService: @unchecked Sendable {
             fileCount: info.fileCount,
             monthKey: currentMonthKey(),
             dayKey: currentDayKey(),
+            sessionCostsModTime: getSessionCostsModTime(),
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             cacheCreationTokens: usage.cacheCreationTokens,

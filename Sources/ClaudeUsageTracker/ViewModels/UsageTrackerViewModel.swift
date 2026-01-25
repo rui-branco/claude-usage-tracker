@@ -764,6 +764,7 @@ final class UsageTrackerViewModel: ObservableObject {
 
     // Parse ALL transcripts in a directory with GLOBAL deduplication by message ID
     // Uses caching to avoid re-parsing unchanged directories
+    // Also checks session-costs.json for accurate costs from Claude Code
     nonisolated private func parseTranscriptsInDirectory(_ directory: String) -> TranscriptUsage {
         let cacheService = TranscriptCacheService.shared
 
@@ -771,6 +772,9 @@ final class UsageTrackerViewModel: ObservableObject {
         if let cached = cacheService.getCached(directory: directory) {
             return cacheService.toTranscriptUsage(cached)
         }
+
+        // Load real session costs from Claude Code status line
+        let sessionCosts = loadSessionCosts()
 
         // Parse fresh
         var combinedUsage = TranscriptUsage()
@@ -780,6 +784,46 @@ final class UsageTrackerViewModel: ObservableObject {
         }
 
         let jsonlFiles = files.filter { $0.hasSuffix(".jsonl") }
+
+        // Track which sessions have real costs and their values
+        var realCostTotal: Double = 0
+        var realCostMonthly: Double = 0
+        var realCostDaily: Double = 0
+        var hasRealCosts = false
+
+        // Get current month/day start for filtering real costs
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date()
+        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        let todayStart = calendar.startOfDay(for: now)
+
+        // Pre-check which sessions have real costs
+        for file in jsonlFiles {
+            let sessionId = String(file.dropLast(6)) // Remove .jsonl
+            if let sessionCost = sessionCosts[sessionId] {
+                hasRealCosts = true
+                realCostTotal += sessionCost.cost_usd
+
+                // Parse the updated timestamp to determine monthly/daily
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                var sessionDate = formatter.date(from: sessionCost.updated)
+                if sessionDate == nil {
+                    formatter.formatOptions = [.withInternetDateTime]
+                    sessionDate = formatter.date(from: sessionCost.updated)
+                }
+
+                if let date = sessionDate {
+                    if date >= monthStart {
+                        realCostMonthly += sessionCost.cost_usd
+                    }
+                    if date >= todayStart {
+                        realCostDaily += sessionCost.cost_usd
+                    }
+                }
+            }
+        }
 
         // Global message deduplication across ALL files
         struct MessageEntry {
@@ -797,12 +841,6 @@ final class UsageTrackerViewModel: ObservableObject {
         }
         var globalMessageMap: [String: MessageEntry] = [:]
         var thinkingTokensMap: [String: Int] = [:]  // Track max thinking tokens per message ID
-
-        var calendar = Calendar.current
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let now = Date()
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
-        let todayStart = calendar.startOfDay(for: now)
 
         for file in jsonlFiles {
             let fullPath = "\(directory)/\(file)"
@@ -952,6 +990,14 @@ final class UsageTrackerViewModel: ObservableObject {
             }
         }
 
+        // Override with real costs from session-costs.json when available
+        // Real costs are more accurate as they include thinking tokens, system prompts, and tool overhead
+        if hasRealCosts {
+            combinedUsage.calculatedCost = realCostTotal
+            combinedUsage.calculatedMonthlyCost = realCostMonthly
+            combinedUsage.calculatedDailyCost = realCostDaily
+        }
+
         // Cache the result for future use
         cacheService.cacheDirectory(directory: directory, usage: combinedUsage)
 
@@ -967,6 +1013,30 @@ final class UsageTrackerViewModel: ObservableObject {
     private let transcriptParser = TranscriptParser()
     @Published var cachedCostBreakdown = APICostBreakdown()
     @Published var isLoadingAPICosts = true  // Start true, set false when done
+
+    // Session costs from Claude Code status line (real costs)
+    private struct SessionCostEntry: Codable {
+        let cost_usd: Double
+        let duration_ms: Int?
+        let model: String?
+        let updated: String
+    }
+    private var sessionCostsCache: [String: SessionCostEntry]?
+    private var sessionCostsCacheTime: Date?
+
+    /// Load session costs from ~/.claude/session-costs.json
+    /// This file is updated in real-time by the Claude Code status line script
+    nonisolated private func loadSessionCosts() -> [String: SessionCostEntry] {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        let path = "\(homeDir)/.claude/session-costs.json"
+
+        guard let data = FileManager.default.contents(atPath: path),
+              let costs = try? JSONDecoder().decode([String: SessionCostEntry].self, from: data) else {
+            return [:]
+        }
+
+        return costs
+    }
 
     var hasAPIProjects: Bool {
         cachedCostBreakdown.hasBedrock || cachedCostBreakdown.hasClaudeAPI
