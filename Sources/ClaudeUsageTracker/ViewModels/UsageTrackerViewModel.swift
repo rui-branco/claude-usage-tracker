@@ -796,6 +796,7 @@ final class UsageTrackerViewModel: ObservableObject {
             let cacheRead: Int
         }
         var globalMessageMap: [String: MessageEntry] = [:]
+        var thinkingTokensMap: [String: Int] = [:]  // Track max thinking tokens per message ID
 
         var calendar = Calendar.current
         calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -839,6 +840,8 @@ final class UsageTrackerViewModel: ObservableObject {
                 }
 
                 // Extract thinking tokens from content (not included in output_tokens)
+                // IMPORTANT: Thinking content only appears in early streaming entries,
+                // so we track the MAX thinking tokens seen for each message ID
                 var thinkingChars = 0
                 if let content = message["content"] as? [[String: Any]] {
                     for block in content {
@@ -848,14 +851,20 @@ final class UsageTrackerViewModel: ObservableObject {
                         }
                     }
                 }
-                // Estimate tokens: ~4 chars per token for English
-                let thinkingTokens = thinkingChars / 4
+                // Estimate tokens: ~2.5 chars per token for English
+                let thinkingTokens = Int(Double(thinkingChars) / 2.5)
+                // Keep max thinking tokens seen (early entries have thinking, later entries don't)
+                let existingThinking = thinkingTokensMap[messageId] ?? 0
+                thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
 
                 if let usageData = message["usage"] as? [String: Any] {
                     // Detect direct Claude API: no service_tier and not Bedrock
                     // Subscription has service_tier: "standard"
                     let hasServiceTier = usageData["service_tier"] != nil
                     let isClaudeAPI = !isBedrock && !hasServiceTier
+
+                    // Use max thinking tokens from all entries for this message
+                    let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
 
                     let entry = MessageEntry(
                         model: model,
@@ -866,11 +875,11 @@ final class UsageTrackerViewModel: ObservableObject {
                         messageDate: messageDate,
                         input: usageData["input_tokens"] as? Int ?? 0,
                         output: usageData["output_tokens"] as? Int ?? 0,
-                        thinkingTokens: thinkingTokens,
+                        thinkingTokens: finalThinkingTokens,
                         cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
                         cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
                     )
-                    // Keep last entry per message ID (has final token count)
+                    // Keep last entry per message ID (has final token count, but use max thinking)
                     globalMessageMap[messageId] = entry
                 }
             }

@@ -169,6 +169,7 @@ final class TranscriptParser: @unchecked Sendable {
             let cacheRead: Int
         }
         var messageMap: [String: MessageEntry] = [:]
+        var thinkingTokensMap: [String: Int] = [:]  // Track max thinking tokens per message ID
 
         for line in lines {
             guard !line.isEmpty,
@@ -203,6 +204,8 @@ final class TranscriptParser: @unchecked Sendable {
                     }
 
                     // Extract thinking tokens from content (not included in output_tokens)
+                    // IMPORTANT: Thinking content only appears in early streaming entries,
+                    // so we track the MAX thinking tokens seen for each message ID
                     var thinkingChars = 0
                     if let content = message["content"] as? [[String: Any]] {
                         for block in content {
@@ -212,8 +215,11 @@ final class TranscriptParser: @unchecked Sendable {
                             }
                         }
                     }
-                    // Estimate tokens: ~4 chars per token for English
-                    let thinkingTokens = thinkingChars / 4
+                    // Estimate tokens: ~2.5 chars per token for English
+                    let thinkingTokens = Int(Double(thinkingChars) / 2.5)
+                    // Keep max thinking tokens seen (early entries have thinking, later entries don't)
+                    let existingThinking = thinkingTokensMap[messageId] ?? 0
+                    thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
 
                     // Extract usage and detect API type
                     if let usageData = message["usage"] as? [String: Any] {
@@ -223,6 +229,9 @@ final class TranscriptParser: @unchecked Sendable {
                         // Direct API has neither
                         let hasServiceTier = usageData["service_tier"] != nil
                         let isClaudeAPI = !isBedrock && !hasServiceTier
+
+                        // Use max thinking tokens from all entries for this message
+                        let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
 
                         let entry = MessageEntry(
                             model: model,
@@ -234,11 +243,11 @@ final class TranscriptParser: @unchecked Sendable {
                             messageDate: messageDate,
                             input: usageData["input_tokens"] as? Int ?? 0,
                             output: usageData["output_tokens"] as? Int ?? 0,
-                            thinkingTokens: thinkingTokens,
+                            thinkingTokens: finalThinkingTokens,
                             cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
                             cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
                         )
-                        // Keep last entry per message ID (has final token count)
+                        // Keep last entry per message ID (has final token count, but use max thinking)
                         messageMap[messageId] = entry
                     }
                 }
