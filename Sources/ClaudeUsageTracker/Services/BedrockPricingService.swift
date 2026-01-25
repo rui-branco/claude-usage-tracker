@@ -97,6 +97,8 @@ final class PricingService: @unchecked Sendable {
         let models = getPricingModels(for: date, from: currentConfig)
 
         // Check for specific model versions first, then fall back to family
+        // Note: "claude-haiku" without version means the current default (haiku-4-5 since Oct 2025)
+        // Similarly "claude-opus" without version would mean the current default
         let modelKey: String
         let fallbackKey: String
 
@@ -104,13 +106,15 @@ final class PricingService: @unchecked Sendable {
             modelKey = "opus-4-5"
             fallbackKey = "opus"
         } else if modelLower.contains("opus") {
-            modelKey = "opus"
+            // Unversioned opus - check if opus-4-5 is available (current default)
+            modelKey = models["opus-4-5"] != nil ? "opus-4-5" : "opus"
             fallbackKey = "opus"
         } else if modelLower.contains("haiku-4-5") || modelLower.contains("haiku-4.5") || modelLower.contains("haiku_4_5") {
             modelKey = "haiku-4-5"
             fallbackKey = "haiku"
         } else if modelLower.contains("haiku") {
-            modelKey = "haiku"
+            // Unversioned haiku - use haiku-4-5 if available (current default since Oct 2025)
+            modelKey = models["haiku-4-5"] != nil ? "haiku-4-5" : "haiku"
             fallbackKey = "haiku"
         } else if modelLower.contains("sonnet") {
             modelKey = "sonnet"

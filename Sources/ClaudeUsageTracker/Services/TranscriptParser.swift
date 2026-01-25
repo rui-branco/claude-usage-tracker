@@ -145,8 +145,9 @@ final class TranscriptParser: @unchecked Sendable {
     private func parseLines(_ content: String, into usage: inout TranscriptUsage) {
         let lines = content.components(separatedBy: "\n")
 
-        // Get start of current month and today
-        let calendar = Calendar.current
+        // Get start of current month and today (in UTC to match transcript timestamps)
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone(identifier: "UTC")!
         let now = Date()
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
         let todayStart = calendar.startOfDay(for: now)

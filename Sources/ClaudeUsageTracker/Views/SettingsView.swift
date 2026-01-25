@@ -242,10 +242,17 @@ struct AppearanceSettingsTab: View {
             Section {
                 Toggle("Session % in Menu Bar", isOn: $settings.showMenuBarPercentage)
                 Toggle("API Cost in Menu Bar", isOn: $settings.showMenuBarAPICost)
+                if settings.showMenuBarAPICost {
+                    Picker("Show Cost", selection: $settings.menuBarAPICostType) {
+                        Text("Today").tag("daily")
+                        Text("This Month").tag("monthly")
+                    }
+                    .pickerStyle(.segmented)
+                }
             } header: {
                 Label("Menu Bar", systemImage: "menubar.rectangle")
             } footer: {
-                Text("API Cost shows your estimated monthly spending from API usage (Bedrock/Claude API).")
+                Text("API Cost shows your estimated spending from API usage (Bedrock/Claude API).")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

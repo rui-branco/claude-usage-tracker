@@ -227,8 +227,10 @@ final class UsageTrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { breakdown in
                 let monthlyCost = breakdown.totalMonthly
-                if monthlyCost > 0 {
+                let dailyCost = breakdown.totalDaily
+                if monthlyCost > 0 || dailyCost > 0 {
                     MenuBarState.shared.apiCost = monthlyCost
+                    MenuBarState.shared.dailyApiCost = dailyCost
                     if breakdown.hasMultiple {
                         MenuBarState.shared.apiType = .mixed
                     } else if breakdown.hasBedrock {
@@ -240,6 +242,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     }
                 } else {
                     MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.dailyApiCost = nil
                     MenuBarState.shared.apiType = .none
                 }
             }
@@ -755,6 +758,7 @@ final class UsageTrackerViewModel: ObservableObject {
             let isBedrock: Bool
             let isClaudeAPI: Bool  // Direct Claude API (no service_tier, not Bedrock)
             let isThisMonth: Bool
+            let isToday: Bool
             let messageDate: Date?  // For time-based pricing
             let input: Int
             let output: Int
@@ -763,9 +767,11 @@ final class UsageTrackerViewModel: ObservableObject {
         }
         var globalMessageMap: [String: MessageEntry] = [:]
 
-        let calendar = Calendar.current
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone(identifier: "UTC")!
         let now = Date()
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        let todayStart = calendar.startOfDay(for: now)
 
         for file in jsonlFiles {
             let fullPath = "\(directory)/\(file)"
@@ -785,6 +791,7 @@ final class UsageTrackerViewModel: ObservableObject {
                 let isBedrock = messageId.hasPrefix("msg_bdrk_")
 
                 var isThisMonth = false
+                var isToday = false
                 var messageDate: Date?
                 if let timestamp = json["timestamp"] as? String {
                     let formatter = ISO8601DateFormatter()
@@ -796,6 +803,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     }
                     if let date = date {
                         isThisMonth = date >= monthStart
+                        isToday = date >= todayStart
                         messageDate = date
                     }
                 }
@@ -811,6 +819,7 @@ final class UsageTrackerViewModel: ObservableObject {
                         isBedrock: isBedrock,
                         isClaudeAPI: isClaudeAPI,
                         isThisMonth: isThisMonth,
+                        isToday: isToday,
                         messageDate: messageDate,
                         input: usageData["input_tokens"] as? Int ?? 0,
                         output: usageData["output_tokens"] as? Int ?? 0,
@@ -871,6 +880,14 @@ final class UsageTrackerViewModel: ObservableObject {
                 monthlyModelData.cacheCreationTokens += entry.cacheCreate
                 monthlyModelData.cacheReadTokens += entry.cacheRead
                 combinedUsage.monthlyModelUsage[entry.model] = monthlyModelData
+            }
+
+            if entry.isToday {
+                combinedUsage.dailyInputTokens += entry.input
+                combinedUsage.dailyOutputTokens += entry.output
+                combinedUsage.dailyCacheCreationTokens += entry.cacheCreate
+                combinedUsage.dailyCacheReadTokens += entry.cacheRead
+                combinedUsage.calculatedDailyCost += messageCost
             }
         }
 
@@ -949,6 +966,7 @@ final class UsageTrackerViewModel: ObservableObject {
                 await MainActor.run {
                     self.cachedCostBreakdown = APICostBreakdown()
                     MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.dailyApiCost = nil
                     MenuBarState.shared.apiType = .none
                 }
                 return
@@ -997,9 +1015,11 @@ final class UsageTrackerViewModel: ObservableObject {
                 self.cachedCostBreakdown = finalBreakdown
 
                 // Update menu bar with total cost and type
-                let totalCost = finalBreakdown.totalAll
-                if totalCost > 0 {
-                    MenuBarState.shared.apiCost = totalCost
+                let monthlyCost = finalBreakdown.totalMonthly
+                let dailyCost = finalBreakdown.totalDaily
+                if monthlyCost > 0 || dailyCost > 0 {
+                    MenuBarState.shared.apiCost = monthlyCost
+                    MenuBarState.shared.dailyApiCost = dailyCost
                     // Set API type
                     if finalBreakdown.hasMultiple {
                         MenuBarState.shared.apiType = .mixed
@@ -1012,6 +1032,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     }
                 } else {
                     MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.dailyApiCost = nil
                     MenuBarState.shared.apiType = .none
                 }
 

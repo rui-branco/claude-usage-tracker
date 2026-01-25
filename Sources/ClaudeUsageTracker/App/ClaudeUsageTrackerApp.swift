@@ -92,8 +92,16 @@ struct CostMenuBarLabel: View {
     @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
 
+    private var displayCost: Double? {
+        if settings.menuBarAPICostType == "daily" {
+            return state.dailyApiCost
+        } else {
+            return state.apiCost
+        }
+    }
+
     var body: some View {
-        if settings.showMenuBarAPICost, let cost = state.apiCost, cost > 0 {
+        if settings.showMenuBarAPICost, let cost = displayCost, cost > 0 {
             HStack(spacing: 4) {
                 ClaudeMenuIcon()
                 Text("$\(Int(cost))")
@@ -116,7 +124,8 @@ class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
     @Published var fiveHourResetAt: Date?
-    @Published var apiCost: Double?
+    @Published var apiCost: Double?  // Monthly cost
+    @Published var dailyApiCost: Double?  // Today's cost
     @Published var apiType: MenuBarAPIType = .none
 
     var apiTypeLabel: String {

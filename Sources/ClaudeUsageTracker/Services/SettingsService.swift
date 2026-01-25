@@ -44,6 +44,9 @@ final class SettingsService: ObservableObject {
     @Published var showMenuBarAPICost: Bool {
         didSet { UserDefaults.standard.set(showMenuBarAPICost, forKey: "showMenuBarAPICost") }
     }
+    @Published var menuBarAPICostType: String {  // "daily" or "monthly"
+        didSet { UserDefaults.standard.set(menuBarAPICostType, forKey: "menuBarAPICostType") }
+    }
     @Published var compactMode: Bool {
         didSet { UserDefaults.standard.set(compactMode, forKey: "compactMode") }
     }
@@ -109,6 +112,7 @@ final class SettingsService: ObservableObject {
             // Display
             "showMenuBarPercentage": true,
             "showMenuBarAPICost": true,
+            "menuBarAPICostType": "monthly",
             "compactMode": false,
             "showTokenCounts": true,
             // Notifications
@@ -140,6 +144,7 @@ final class SettingsService: ObservableObject {
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
         self.showMenuBarAPICost = defaults.bool(forKey: "showMenuBarAPICost")
+        self.menuBarAPICostType = defaults.string(forKey: "menuBarAPICostType") ?? "monthly"
         self.compactMode = defaults.bool(forKey: "compactMode")
         self.showTokenCounts = defaults.bool(forKey: "showTokenCounts")
 
@@ -202,6 +207,7 @@ final class SettingsService: ObservableObject {
         showAPICost = true
         showMenuBarPercentage = true
         showMenuBarAPICost = true
+        menuBarAPICostType = "monthly"
         compactMode = false
         showTokenCounts = true
         notificationsEnabled = true

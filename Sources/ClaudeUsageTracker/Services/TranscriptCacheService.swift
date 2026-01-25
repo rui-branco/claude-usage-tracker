@@ -8,6 +8,8 @@ struct CachedDirectoryData: Codable {
     let fileCount: Int
     /// Month key for monthly data (YYYY-MM)
     let monthKey: String
+    /// Day key for daily data (YYYY-MM-DD)
+    let dayKey: String?
 
     // Aggregated usage data
     let inputTokens: Int
@@ -22,6 +24,11 @@ struct CachedDirectoryData: Codable {
     let monthlyCacheCreationTokens: Int
     let monthlyCacheReadTokens: Int
     let calculatedMonthlyCost: Double
+    let dailyInputTokens: Int?
+    let dailyOutputTokens: Int?
+    let dailyCacheCreationTokens: Int?
+    let dailyCacheReadTokens: Int?
+    let calculatedDailyCost: Double?
     let modelUsage: [String: CachedModelUsage]
     let monthlyModelUsage: [String: CachedModelUsage]
 }
@@ -35,7 +42,7 @@ struct CachedModelUsage: Codable {
 
 /// Cache for all project directories
 struct TranscriptCache: Codable {
-    var version: Int = 3  // Bumped to force recalculation after pricing update (Jan 2026)
+    var version: Int = 4  // Bumped to add daily cost tracking
     /// Map of directory path -> cached data
     var directories: [String: CachedDirectoryData] = [:]
     var lastUpdated: Date = Date()
@@ -62,7 +69,7 @@ final class TranscriptCacheService: @unchecked Sendable {
     private func loadCache() {
         guard let data = fileManager.contents(atPath: cacheFilePath),
               let loaded = try? JSONDecoder().decode(TranscriptCache.self, from: data),
-              loaded.version == 3 else {
+              loaded.version == 4 else {
             return
         }
         cache = loaded
@@ -82,6 +89,14 @@ final class TranscriptCacheService: @unchecked Sendable {
     func currentMonthKey() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM"
+        return formatter.string(from: Date())
+    }
+
+    /// Get current day key for tracking daily stats
+    func currentDayKey() -> String {
+        let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
     }
 
@@ -115,6 +130,11 @@ final class TranscriptCacheService: @unchecked Sendable {
 
         // Re-parse if month changed (monthly stats need recalculation)
         if cached.monthKey != currentMonthKey() {
+            return true
+        }
+
+        // Re-parse if day changed (daily stats need recalculation)
+        if cached.dayKey != currentDayKey() {
             return true
         }
 
@@ -154,6 +174,7 @@ final class TranscriptCacheService: @unchecked Sendable {
             latestFileModification: info.latestMod,
             fileCount: info.fileCount,
             monthKey: currentMonthKey(),
+            dayKey: currentDayKey(),
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             cacheCreationTokens: usage.cacheCreationTokens,
@@ -166,6 +187,11 @@ final class TranscriptCacheService: @unchecked Sendable {
             monthlyCacheCreationTokens: usage.monthlyCacheCreationTokens,
             monthlyCacheReadTokens: usage.monthlyCacheReadTokens,
             calculatedMonthlyCost: usage.calculatedMonthlyCost,
+            dailyInputTokens: usage.dailyInputTokens,
+            dailyOutputTokens: usage.dailyOutputTokens,
+            dailyCacheCreationTokens: usage.dailyCacheCreationTokens,
+            dailyCacheReadTokens: usage.dailyCacheReadTokens,
+            calculatedDailyCost: usage.calculatedDailyCost,
             modelUsage: usage.modelUsage.mapValues { m in
                 CachedModelUsage(
                     inputTokens: m.inputTokens,
@@ -218,6 +244,11 @@ final class TranscriptCacheService: @unchecked Sendable {
         usage.monthlyCacheCreationTokens = cached.monthlyCacheCreationTokens
         usage.monthlyCacheReadTokens = cached.monthlyCacheReadTokens
         usage.calculatedMonthlyCost = cached.calculatedMonthlyCost
+        usage.dailyInputTokens = cached.dailyInputTokens ?? 0
+        usage.dailyOutputTokens = cached.dailyOutputTokens ?? 0
+        usage.dailyCacheCreationTokens = cached.dailyCacheCreationTokens ?? 0
+        usage.dailyCacheReadTokens = cached.dailyCacheReadTokens ?? 0
+        usage.calculatedDailyCost = cached.calculatedDailyCost ?? 0
         usage.modelUsage = cached.modelUsage.mapValues { m in
             var data = ModelUsageData()
             data.inputTokens = m.inputTokens
