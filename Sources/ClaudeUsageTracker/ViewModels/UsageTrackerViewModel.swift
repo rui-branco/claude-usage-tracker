@@ -330,6 +330,20 @@ final class UsageTrackerViewModel: ObservableObject {
                     if let model = cache.model {
                         enrichedSessions[i].modelName = model.displayName ?? model.id
                     }
+                    // Calculate session cost from real-time token data
+                    if let currentUsage = contextWindow.currentUsage {
+                        let modelId = cache.model?.id ?? ""
+                        let sessionCost = PricingService.shared.calculateCost(
+                            inputTokens: currentUsage.inputTokens ?? 0,
+                            outputTokens: currentUsage.outputTokens ?? 0,
+                            cacheCreationTokens: currentUsage.cacheCreationInputTokens ?? 0,
+                            cacheReadTokens: currentUsage.cacheReadInputTokens ?? 0,
+                            model: modelId
+                        )
+                        if sessionCost > 0 {
+                            enrichedSessions[i].cost = sessionCost
+                        }
+                    }
                     break
                 }
             }
@@ -356,15 +370,30 @@ final class UsageTrackerViewModel: ObservableObject {
                             if isBedrockModel {
                                 enrichedSessions[i].apiType = .bedrock
                             }
-
-                            // Use actual cost from config (lastCost) when available
-                            // This contains the real cost calculated by Claude
-                            if let actualCost = projectConfig.lastCost, actualCost > 0 {
-                                enrichedSessions[i].cost = actualCost
-                            }
+                            // Note: Don't set cost from config here - we want session-specific cost
+                            // which comes from real-time data in the first pass
                         }
                         break
                     }
+                }
+            }
+        }
+
+        // Third: use API type from cached live sessions, but DON'T override session-specific cost
+        // Session cost should come from real-time data (first pass), not project totals
+        for i in 0..<enrichedSessions.count {
+            let sessionName = enrichedSessions[i].projectName
+            let sessionPath = enrichedSessions[i].projectPath
+
+            // Try to match with cached session by name or path
+            if let cachedSession = cachedLiveSessions.first(where: { cached in
+                cached.projectName == sessionName ||
+                cached.projectPath.contains(sessionName) ||
+                sessionPath.contains(cached.projectName)
+            }) {
+                // Only use API type, not cost (cost should be session-specific from real-time data)
+                if cachedSession.isAPI {
+                    enrichedSessions[i].apiType = cachedSession.apiType
                 }
             }
         }
@@ -872,7 +901,10 @@ final class UsageTrackerViewModel: ObservableObject {
                 combinedUsage.monthlyOutputTokens += entry.output
                 combinedUsage.monthlyCacheCreationTokens += entry.cacheCreate
                 combinedUsage.monthlyCacheReadTokens += entry.cacheRead
-                combinedUsage.calculatedMonthlyCost += messageCost
+                // Only count paid API messages for monthly cost
+                if entry.isBedrock || entry.isClaudeAPI {
+                    combinedUsage.calculatedMonthlyCost += messageCost
+                }
 
                 var monthlyModelData = combinedUsage.monthlyModelUsage[entry.model] ?? ModelUsageData()
                 monthlyModelData.inputTokens += entry.input
@@ -887,7 +919,10 @@ final class UsageTrackerViewModel: ObservableObject {
                 combinedUsage.dailyOutputTokens += entry.output
                 combinedUsage.dailyCacheCreationTokens += entry.cacheCreate
                 combinedUsage.dailyCacheReadTokens += entry.cacheRead
-                combinedUsage.calculatedDailyCost += messageCost
+                // Only count paid API messages for daily cost
+                if entry.isBedrock || entry.isClaudeAPI {
+                    combinedUsage.calculatedDailyCost += messageCost
+                }
             }
         }
 

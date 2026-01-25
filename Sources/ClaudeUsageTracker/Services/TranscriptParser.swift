@@ -275,7 +275,10 @@ final class TranscriptParser: @unchecked Sendable {
                 usage.monthlyOutputTokens += entry.output
                 usage.monthlyCacheCreationTokens += entry.cacheCreate
                 usage.monthlyCacheReadTokens += entry.cacheRead
-                usage.calculatedMonthlyCost += messageCost
+                // Only count paid API messages for monthly cost
+                if entry.isBedrock || entry.isClaudeAPI {
+                    usage.calculatedMonthlyCost += messageCost
+                }
 
                 var monthlyModelData = usage.monthlyModelUsage[entry.model] ?? ModelUsageData()
                 monthlyModelData.inputTokens += entry.input
@@ -291,7 +294,10 @@ final class TranscriptParser: @unchecked Sendable {
                 usage.dailyOutputTokens += entry.output
                 usage.dailyCacheCreationTokens += entry.cacheCreate
                 usage.dailyCacheReadTokens += entry.cacheRead
-                usage.calculatedDailyCost += messageCost
+                // Only count paid API messages for daily cost
+                if entry.isBedrock || entry.isClaudeAPI {
+                    usage.calculatedDailyCost += messageCost
+                }
             }
         }
     }
