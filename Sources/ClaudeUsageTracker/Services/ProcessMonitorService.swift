@@ -99,12 +99,17 @@ final class ProcessMonitorService: ObservableObject {
         let lines = output.components(separatedBy: "\n")
 
         for line in lines {
-            // Match lines ending with "claude" (the CLI process)
+            // Match Claude CLI processes
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasSuffix("claude") || trimmed.contains("/claude ") else { continue }
+            // Look for: ends with "claude", contains "claude --", or contains "/claude "
+            let isClaudeProcess = trimmed.hasSuffix("claude") ||
+                                  trimmed.contains("claude --") ||
+                                  trimmed.contains("/claude ")
+            guard isClaudeProcess else { continue }
             guard !line.contains("ClaudeUsageTracker") &&
                   !line.contains("Claude.app") &&
-                  !line.contains("grep") else { continue }
+                  !line.contains("grep") &&
+                  !line.contains("--claude-in-chrome-mcp") else { continue }
 
             let components = line.split(separator: " ", omittingEmptySubsequences: true)
             guard components.count >= 11 else { continue }
