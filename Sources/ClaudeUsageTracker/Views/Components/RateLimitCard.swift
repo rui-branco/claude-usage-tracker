@@ -168,11 +168,14 @@ struct RateLimitBar: View {
 }
 
 struct APICostBreakdown {
+    var bedrockDaily: Double = 0
     var bedrockMonthly: Double = 0
     var bedrockTotal: Double = 0
+    var claudeAPIDaily: Double = 0
     var claudeAPIMonthly: Double = 0
     var claudeAPITotal: Double = 0
 
+    var totalDaily: Double { bedrockDaily + claudeAPIDaily }
     var totalMonthly: Double { bedrockMonthly + claudeAPIMonthly }
     var totalAll: Double { bedrockTotal + claudeAPITotal }
     var hasBedrock: Bool { bedrockTotal > 0 }
@@ -227,6 +230,7 @@ struct APICostCard: View {
                 APITypeRow(
                     name: "Bedrock",
                     color: .orange,
+                    daily: breakdown.bedrockDaily,
                     monthly: breakdown.bedrockMonthly,
                     total: breakdown.bedrockTotal
                 )
@@ -236,6 +240,7 @@ struct APICostCard: View {
                 APITypeRow(
                     name: "Claude API",
                     color: .blue,
+                    daily: breakdown.claudeAPIDaily,
                     monthly: breakdown.claudeAPIMonthly,
                     total: breakdown.claudeAPITotal
                 )
@@ -254,7 +259,7 @@ struct APICostCard: View {
                     Text("/")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text(formatCost(breakdown.totalAll))
+                    Text(formatCost(breakdown.totalDaily))
                         .font(.caption.monospacedDigit())
                         .foregroundColor(.secondary)
                 }
@@ -278,6 +283,7 @@ struct APICostCard: View {
 struct APITypeRow: View {
     let name: String
     let color: Color
+    let daily: Double
     let monthly: Double
     let total: Double
 
@@ -294,19 +300,19 @@ struct APITypeRow: View {
                 Text(formatCost(monthly))
                     .font(.system(size: 13, weight: .semibold).monospacedDigit())
                     .foregroundColor(color)
-                Text("this month")
+                Text("month")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
             }
             VStack(alignment: .trailing, spacing: 1) {
-                Text(formatCost(total))
+                Text(formatCost(daily))
                     .font(.caption.monospacedDigit())
                     .foregroundColor(.secondary)
-                Text("all time")
+                Text("today")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
             }
-            .frame(width: 70)
+            .frame(width: 50)
         }
     }
 

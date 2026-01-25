@@ -914,6 +914,10 @@ final class UsageTrackerViewModel: ObservableObject {
         cachedCostBreakdown.totalMonthly
     }
 
+    var dailyAPICost: Double {
+        cachedCostBreakdown.totalDaily
+    }
+
     var apiCostBreakdown: APICostBreakdown {
         cachedCostBreakdown
     }
@@ -970,14 +974,17 @@ final class UsageTrackerViewModel: ObservableObject {
 
                     let projectTotal = usage.calculateCost()
                     let projectMonthly = usage.calculateMonthlyCost()
+                    let projectDaily = usage.calculatedDailyCost
 
                     // Add to appropriate bucket
                     if usage.hasBedrock {
                         breakdown.bedrockTotal += projectTotal
                         breakdown.bedrockMonthly += projectMonthly
+                        breakdown.bedrockDaily += projectDaily
                     } else if usage.hasClaudeAPI {
                         breakdown.claudeAPITotal += projectTotal
                         breakdown.claudeAPIMonthly += projectMonthly
+                        breakdown.claudeAPIDaily += projectDaily
                     }
                 }
             } catch {

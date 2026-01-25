@@ -20,6 +20,7 @@ struct TranscriptUsage {
     // Cost calculated per message with correct pricing for that time period
     var calculatedCost: Double = 0
     var calculatedMonthlyCost: Double = 0
+    var calculatedDailyCost: Double = 0
 
     // Monthly tracking
     var monthlyInputTokens: Int = 0
@@ -27,6 +28,12 @@ struct TranscriptUsage {
     var monthlyCacheCreationTokens: Int = 0
     var monthlyCacheReadTokens: Int = 0
     var monthlyModelUsage: [String: ModelUsageData] = [:]
+
+    // Daily tracking (today)
+    var dailyInputTokens: Int = 0
+    var dailyOutputTokens: Int = 0
+    var dailyCacheCreationTokens: Int = 0
+    var dailyCacheReadTokens: Int = 0
 
     // All tokens used (input + output + cache)
     var totalTokens: Int {
@@ -138,10 +145,11 @@ final class TranscriptParser: @unchecked Sendable {
     private func parseLines(_ content: String, into usage: inout TranscriptUsage) {
         let lines = content.components(separatedBy: "\n")
 
-        // Get start of current month
+        // Get start of current month and today
         let calendar = Calendar.current
         let now = Date()
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        let todayStart = calendar.startOfDay(for: now)
 
         // First pass: collect final version of each message (by ID)
         // Messages stream incrementally - only the LAST entry per ID has final token counts
@@ -151,6 +159,7 @@ final class TranscriptParser: @unchecked Sendable {
             let isBedrock: Bool
             let isClaudeAPI: Bool  // Direct Claude API (no service_tier, not Bedrock)
             let isThisMonth: Bool
+            let isToday: Bool
             let messageDate: Date?  // For time-based pricing
             let input: Int
             let output: Int
@@ -174,6 +183,7 @@ final class TranscriptParser: @unchecked Sendable {
 
                     // Extract timestamp
                     var isThisMonth = false
+                    var isToday = false
                     var messageDate: Date?
                     if let timestamp = json["timestamp"] as? String {
                         let formatter = ISO8601DateFormatter()
@@ -185,6 +195,7 @@ final class TranscriptParser: @unchecked Sendable {
                         }
                         if let date = date {
                             isThisMonth = date >= monthStart
+                            isToday = date >= todayStart
                             messageDate = date
                         }
                     }
@@ -204,6 +215,7 @@ final class TranscriptParser: @unchecked Sendable {
                             isBedrock: isBedrock,
                             isClaudeAPI: isClaudeAPI,
                             isThisMonth: isThisMonth,
+                            isToday: isToday,
                             messageDate: messageDate,
                             input: usageData["input_tokens"] as? Int ?? 0,
                             output: usageData["output_tokens"] as? Int ?? 0,
@@ -271,6 +283,15 @@ final class TranscriptParser: @unchecked Sendable {
                 monthlyModelData.cacheReadTokens += entry.cacheRead
                 usage.monthlyModelUsage[entry.model] = monthlyModelData
             }
+
+            // Track daily usage (today)
+            if entry.isToday {
+                usage.dailyInputTokens += entry.input
+                usage.dailyOutputTokens += entry.output
+                usage.dailyCacheCreationTokens += entry.cacheCreate
+                usage.dailyCacheReadTokens += entry.cacheRead
+                usage.calculatedDailyCost += messageCost
+            }
         }
     }
 
@@ -301,6 +322,7 @@ final class TranscriptParser: @unchecked Sendable {
                 // Accumulate costs (calculated with time-based pricing)
                 combinedUsage.calculatedCost += fileUsage.calculatedCost
                 combinedUsage.calculatedMonthlyCost += fileUsage.calculatedMonthlyCost
+                combinedUsage.calculatedDailyCost += fileUsage.calculatedDailyCost
 
                 // Track API types
                 if fileUsage.isBedrock { combinedUsage.isBedrock = true }
@@ -311,6 +333,12 @@ final class TranscriptParser: @unchecked Sendable {
                 combinedUsage.monthlyOutputTokens += fileUsage.monthlyOutputTokens
                 combinedUsage.monthlyCacheCreationTokens += fileUsage.monthlyCacheCreationTokens
                 combinedUsage.monthlyCacheReadTokens += fileUsage.monthlyCacheReadTokens
+
+                // Accumulate daily
+                combinedUsage.dailyInputTokens += fileUsage.dailyInputTokens
+                combinedUsage.dailyOutputTokens += fileUsage.dailyOutputTokens
+                combinedUsage.dailyCacheCreationTokens += fileUsage.dailyCacheCreationTokens
+                combinedUsage.dailyCacheReadTokens += fileUsage.dailyCacheReadTokens
 
                 // Merge model usage
                 for (model, data) in fileUsage.modelUsage {
