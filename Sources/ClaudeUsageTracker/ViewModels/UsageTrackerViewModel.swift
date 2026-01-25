@@ -791,6 +791,7 @@ final class UsageTrackerViewModel: ObservableObject {
             let messageDate: Date?  // For time-based pricing
             let input: Int
             let output: Int
+            let thinkingTokens: Int  // Estimated from thinking content (not in output_tokens)
             let cacheCreate: Int
             let cacheRead: Int
         }
@@ -837,6 +838,19 @@ final class UsageTrackerViewModel: ObservableObject {
                     }
                 }
 
+                // Extract thinking tokens from content (not included in output_tokens)
+                var thinkingChars = 0
+                if let content = message["content"] as? [[String: Any]] {
+                    for block in content {
+                        if block["type"] as? String == "thinking",
+                           let thinking = block["thinking"] as? String {
+                            thinkingChars += thinking.count
+                        }
+                    }
+                }
+                // Estimate tokens: ~4 chars per token for English
+                let thinkingTokens = thinkingChars / 4
+
                 if let usageData = message["usage"] as? [String: Any] {
                     // Detect direct Claude API: no service_tier and not Bedrock
                     // Subscription has service_tier: "standard"
@@ -852,6 +866,7 @@ final class UsageTrackerViewModel: ObservableObject {
                         messageDate: messageDate,
                         input: usageData["input_tokens"] as? Int ?? 0,
                         output: usageData["output_tokens"] as? Int ?? 0,
+                        thinkingTokens: thinkingTokens,
                         cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
                         cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
                     )
@@ -873,15 +888,17 @@ final class UsageTrackerViewModel: ObservableObject {
                 combinedUsage.isClaudeAPI = true
             }
 
+            // Include thinking tokens in output for display and cost
             combinedUsage.inputTokens += entry.input
-            combinedUsage.outputTokens += entry.output
+            combinedUsage.outputTokens += entry.output + entry.thinkingTokens
             combinedUsage.cacheCreationTokens += entry.cacheCreate
             combinedUsage.cacheReadTokens += entry.cacheRead
 
             // Calculate cost using pricing for this message's date
+            // Thinking tokens are billed at same rate as output tokens
             let messageCost = pricingService.calculateCost(
                 inputTokens: entry.input,
-                outputTokens: entry.output,
+                outputTokens: entry.output + entry.thinkingTokens,
                 cacheCreationTokens: entry.cacheCreate,
                 cacheReadTokens: entry.cacheRead,
                 model: entry.model,
@@ -891,14 +908,14 @@ final class UsageTrackerViewModel: ObservableObject {
 
             var modelData = combinedUsage.modelUsage[entry.model] ?? ModelUsageData()
             modelData.inputTokens += entry.input
-            modelData.outputTokens += entry.output
+            modelData.outputTokens += entry.output + entry.thinkingTokens
             modelData.cacheCreationTokens += entry.cacheCreate
             modelData.cacheReadTokens += entry.cacheRead
             combinedUsage.modelUsage[entry.model] = modelData
 
             if entry.isThisMonth {
                 combinedUsage.monthlyInputTokens += entry.input
-                combinedUsage.monthlyOutputTokens += entry.output
+                combinedUsage.monthlyOutputTokens += entry.output + entry.thinkingTokens
                 combinedUsage.monthlyCacheCreationTokens += entry.cacheCreate
                 combinedUsage.monthlyCacheReadTokens += entry.cacheRead
                 // Only count paid API messages for monthly cost
@@ -908,7 +925,7 @@ final class UsageTrackerViewModel: ObservableObject {
 
                 var monthlyModelData = combinedUsage.monthlyModelUsage[entry.model] ?? ModelUsageData()
                 monthlyModelData.inputTokens += entry.input
-                monthlyModelData.outputTokens += entry.output
+                monthlyModelData.outputTokens += entry.output + entry.thinkingTokens
                 monthlyModelData.cacheCreationTokens += entry.cacheCreate
                 monthlyModelData.cacheReadTokens += entry.cacheRead
                 combinedUsage.monthlyModelUsage[entry.model] = monthlyModelData
@@ -916,7 +933,7 @@ final class UsageTrackerViewModel: ObservableObject {
 
             if entry.isToday {
                 combinedUsage.dailyInputTokens += entry.input
-                combinedUsage.dailyOutputTokens += entry.output
+                combinedUsage.dailyOutputTokens += entry.output + entry.thinkingTokens
                 combinedUsage.dailyCacheCreationTokens += entry.cacheCreate
                 combinedUsage.dailyCacheReadTokens += entry.cacheRead
                 // Only count paid API messages for daily cost

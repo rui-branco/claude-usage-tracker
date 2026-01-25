@@ -164,6 +164,7 @@ final class TranscriptParser: @unchecked Sendable {
             let messageDate: Date?  // For time-based pricing
             let input: Int
             let output: Int
+            let thinkingTokens: Int  // Estimated from thinking content (not in output_tokens)
             let cacheCreate: Int
             let cacheRead: Int
         }
@@ -201,6 +202,19 @@ final class TranscriptParser: @unchecked Sendable {
                         }
                     }
 
+                    // Extract thinking tokens from content (not included in output_tokens)
+                    var thinkingChars = 0
+                    if let content = message["content"] as? [[String: Any]] {
+                        for block in content {
+                            if block["type"] as? String == "thinking",
+                               let thinking = block["thinking"] as? String {
+                                thinkingChars += thinking.count
+                            }
+                        }
+                    }
+                    // Estimate tokens: ~4 chars per token for English
+                    let thinkingTokens = thinkingChars / 4
+
                     // Extract usage and detect API type
                     if let usageData = message["usage"] as? [String: Any] {
                         // Detect direct Claude API: no service_tier and not Bedrock
@@ -220,6 +234,7 @@ final class TranscriptParser: @unchecked Sendable {
                             messageDate: messageDate,
                             input: usageData["input_tokens"] as? Int ?? 0,
                             output: usageData["output_tokens"] as? Int ?? 0,
+                            thinkingTokens: thinkingTokens,
                             cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
                             cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
                         )
@@ -244,16 +259,17 @@ final class TranscriptParser: @unchecked Sendable {
                 usage.isClaudeAPI = true
             }
 
-            // Accumulate totals
+            // Accumulate totals (include thinking tokens in output for display)
             usage.inputTokens += entry.input
-            usage.outputTokens += entry.output
+            usage.outputTokens += entry.output + entry.thinkingTokens
             usage.cacheCreationTokens += entry.cacheCreate
             usage.cacheReadTokens += entry.cacheRead
 
             // Calculate cost using pricing for this message's date
+            // Thinking tokens are billed at same rate as output tokens
             let messageCost = pricingService.calculateCost(
                 inputTokens: entry.input,
-                outputTokens: entry.output,
+                outputTokens: entry.output + entry.thinkingTokens,
                 cacheCreationTokens: entry.cacheCreate,
                 cacheReadTokens: entry.cacheRead,
                 model: entry.model,
@@ -261,10 +277,10 @@ final class TranscriptParser: @unchecked Sendable {
             )
             usage.calculatedCost += messageCost
 
-            // Track per-model usage
+            // Track per-model usage (include thinking in output)
             var modelData = usage.modelUsage[entry.model] ?? ModelUsageData()
             modelData.inputTokens += entry.input
-            modelData.outputTokens += entry.output
+            modelData.outputTokens += entry.output + entry.thinkingTokens
             modelData.cacheCreationTokens += entry.cacheCreate
             modelData.cacheReadTokens += entry.cacheRead
             usage.modelUsage[entry.model] = modelData
@@ -272,7 +288,7 @@ final class TranscriptParser: @unchecked Sendable {
             // Track monthly usage
             if entry.isThisMonth {
                 usage.monthlyInputTokens += entry.input
-                usage.monthlyOutputTokens += entry.output
+                usage.monthlyOutputTokens += entry.output + entry.thinkingTokens
                 usage.monthlyCacheCreationTokens += entry.cacheCreate
                 usage.monthlyCacheReadTokens += entry.cacheRead
                 // Only count paid API messages for monthly cost
@@ -282,7 +298,7 @@ final class TranscriptParser: @unchecked Sendable {
 
                 var monthlyModelData = usage.monthlyModelUsage[entry.model] ?? ModelUsageData()
                 monthlyModelData.inputTokens += entry.input
-                monthlyModelData.outputTokens += entry.output
+                monthlyModelData.outputTokens += entry.output + entry.thinkingTokens
                 monthlyModelData.cacheCreationTokens += entry.cacheCreate
                 monthlyModelData.cacheReadTokens += entry.cacheRead
                 usage.monthlyModelUsage[entry.model] = monthlyModelData
@@ -291,7 +307,7 @@ final class TranscriptParser: @unchecked Sendable {
             // Track daily usage (today)
             if entry.isToday {
                 usage.dailyInputTokens += entry.input
-                usage.dailyOutputTokens += entry.output
+                usage.dailyOutputTokens += entry.output + entry.thinkingTokens
                 usage.dailyCacheCreationTokens += entry.cacheCreate
                 usage.dailyCacheReadTokens += entry.cacheRead
                 // Only count paid API messages for daily cost
