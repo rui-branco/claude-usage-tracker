@@ -94,14 +94,27 @@ final class UsageTrackerViewModel: ObservableObject {
 
         // Set up periodic refresh of usage data (every 60 seconds)
         setupUsageRefreshTimer()
+
+        // Set up periodic refresh of API costs (every 5 seconds)
+        setupAPICostRefreshTimer()
     }
 
     private var usageRefreshTimer: Timer?
+    private var apiCostRefreshTimer: Timer?
 
     private func setupUsageRefreshTimer() {
         usageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.fetchUsageFromAPI()
+            }
+        }
+    }
+
+    private func setupAPICostRefreshTimer() {
+        apiCostRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateAPICosts()
+                self?.updateLiveSessions()
             }
         }
     }
