@@ -61,9 +61,19 @@ final class UsageTrackerViewModel: ObservableObject {
     @Published var sessionCache: SessionCache?
 
     // UI State
+    @Published var showDetails = false {
+        didSet {
+            if showDetails && !hasLoadedFullHistory {
+                hasLoadedFullHistory = true
+                updateTranscriptData(currentMonthOnly: false)
+            }
+        }
+    }
     @Published var isHistoryExpanded = true
     @Published var isModelsExpanded = true
     @Published var isTrendExpanded = true
+
+    private var hasLoadedFullHistory = false
 
     private let fileWatcher: FileWatcherService
     private let processMonitor: ProcessMonitorService
@@ -660,7 +670,7 @@ final class UsageTrackerViewModel: ObservableObject {
 
     // Single pass: update both live sessions and API costs from transcripts
     // Scans ALL project directories once, producing both results
-    private func updateTranscriptData() {
+    private func updateTranscriptData(currentMonthOnly: Bool = true) {
         guard !isUpdatingTranscriptData else { return }
         isUpdatingTranscriptData = true
 
@@ -702,7 +712,7 @@ final class UsageTrackerViewModel: ObservableObject {
                           isDirectory.boolValue else { continue }
 
                     // Parse transcripts once
-                    let usage = self.parseTranscriptsInDirectory(fullDirPath)
+                    let usage = self.parseTranscriptsInDirectory(fullDirPath, currentMonthOnly: currentMonthOnly)
                     guard usage.totalTokens > 0 else { continue }
 
                     // --- Live sessions ---
@@ -817,13 +827,14 @@ final class UsageTrackerViewModel: ObservableObject {
         return false
     }
 
-    // Parse ALL transcripts in a directory with GLOBAL deduplication by message ID
+    // Parse transcripts in a directory with GLOBAL deduplication by message ID
     // Uses caching to avoid re-parsing unchanged directories
-    nonisolated private func parseTranscriptsInDirectory(_ directory: String) -> TranscriptUsage {
+    // When currentMonthOnly is true, skips messages older than the current month for faster loading
+    nonisolated private func parseTranscriptsInDirectory(_ directory: String, currentMonthOnly: Bool = true) -> TranscriptUsage {
         let cacheService = TranscriptCacheService.shared
 
-        // Check cache first
-        if let cached = cacheService.getCached(directory: directory) {
+        // Only use cache for full loads (not month-only partial loads)
+        if !currentMonthOnly, let cached = cacheService.getCached(directory: directory) {
             return cacheService.toTranscriptUsage(cached)
         }
 
@@ -915,6 +926,8 @@ final class UsageTrackerViewModel: ObservableObject {
                                     date = formatter.date(from: timestamp)
                                 }
                                 if let date = date {
+                                    // Skip old messages when in quick/current-month-only mode
+                                    if currentMonthOnly && date < monthStart { return }
                                     isThisMonth = date >= monthStart
                                     isToday = date >= todayStart
                                     messageDate = date
@@ -1033,8 +1046,10 @@ final class UsageTrackerViewModel: ObservableObject {
             }
         }
 
-        // Cache the result for future use
-        cacheService.cacheDirectory(directory: directory, usage: combinedUsage)
+        // Only cache full loads (partial month-only data shouldn't pollute cache)
+        if !currentMonthOnly {
+            cacheService.cacheDirectory(directory: directory, usage: combinedUsage)
+        }
 
         return combinedUsage
     }

@@ -65,64 +65,85 @@ struct MenuBarView: View {
                         )
                     }
 
-                    // Period Stats with Time Picker
-                    periodStatsCard
-
-                    // Trend Chart
-                    if settings.showTrendChart && !viewModel.filteredActivity.isEmpty {
-                        CollapsibleCard(
-                            title: "Activity Trend",
-                            icon: "chart.line.uptrend.xyaxis",
-                            count: nil,
-                            isExpanded: $viewModel.isTrendExpanded
-                        ) {
-                            TrendChartView(data: viewModel.filteredActivity)
-                                .frame(height: 80)
+                    // Show Details toggle
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            viewModel.showDetails.toggle()
                         }
+                    }) {
+                        HStack {
+                            Text(viewModel.showDetails ? "Hide Details" : "Show Details")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Image(systemName: viewModel.showDetails ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 4)
                     }
+                    .buttonStyle(.plain)
 
-                    // Model Breakdown
-                    if settings.showModelBreakdown && !viewModel.periodTokensByModel.isEmpty {
-                        CollapsibleCard(
-                            title: "Models",
-                            icon: "cpu",
-                            count: viewModel.periodTokensByModel.count,
-                            isExpanded: $viewModel.isModelsExpanded
-                        ) {
-                            VStack(spacing: 6) {
-                                ForEach(viewModel.periodTokensByModel, id: \.name) { model in
-                                    HStack {
-                                        Circle()
-                                            .fill(model.color)
-                                            .frame(width: 8, height: 8)
-                                        Text(model.displayName)
-                                            .font(.caption)
-                                        Spacer()
-                                        Text(viewModel.formatTokenCount(model.tokens))
-                                            .font(.caption.monospacedDigit())
-                                        Text("(\(formatAPICost(model.apiCost)))")
-                                            .font(.caption2.monospacedDigit())
-                                            .foregroundColor(.secondary)
+                    if viewModel.showDetails {
+                        // Period Stats with Time Picker
+                        periodStatsCard
+
+                        // Trend Chart
+                        if settings.showTrendChart && !viewModel.filteredActivity.isEmpty {
+                            CollapsibleCard(
+                                title: "Activity Trend",
+                                icon: "chart.line.uptrend.xyaxis",
+                                count: nil,
+                                isExpanded: $viewModel.isTrendExpanded
+                            ) {
+                                TrendChartView(data: viewModel.filteredActivity)
+                                    .frame(height: 80)
+                            }
+                        }
+
+                        // Model Breakdown
+                        if settings.showModelBreakdown && !viewModel.periodTokensByModel.isEmpty {
+                            CollapsibleCard(
+                                title: "Models",
+                                icon: "cpu",
+                                count: viewModel.periodTokensByModel.count,
+                                isExpanded: $viewModel.isModelsExpanded
+                            ) {
+                                VStack(spacing: 6) {
+                                    ForEach(viewModel.periodTokensByModel, id: \.name) { model in
+                                        HStack {
+                                            Circle()
+                                                .fill(model.color)
+                                                .frame(width: 8, height: 8)
+                                            Text(model.displayName)
+                                                .font(.caption)
+                                            Spacer()
+                                            Text(viewModel.formatTokenCount(model.tokens))
+                                                .font(.caption.monospacedDigit())
+                                            Text("(\(formatAPICost(model.apiCost)))")
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundColor(.secondary)
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // Recent Projects History
-                    if settings.showRecentProjects {
-                        HistorySessionsCard(
-                            sessions: viewModel.recentSessions,
-                            allSessions: viewModel.liveSessions,
-                            formatTokens: viewModel.formatTokenCount,
-                            formatCost: viewModel.formatCost,
-                            isExpanded: $viewModel.isHistoryExpanded
-                        )
-                    }
+                        // Recent Projects History
+                        if settings.showRecentProjects {
+                            HistorySessionsCard(
+                                sessions: viewModel.recentSessions,
+                                allSessions: viewModel.liveSessions,
+                                formatTokens: viewModel.formatTokenCount,
+                                formatCost: viewModel.formatCost,
+                                isExpanded: $viewModel.isHistoryExpanded
+                            )
+                        }
 
-                    // All Time Totals
-                    if settings.showAllTimeStats && viewModel.selectedTimeFrame != .all {
-                        allTimeSection
+                        // All Time Totals
+                        if settings.showAllTimeStats && viewModel.selectedTimeFrame != .all {
+                            allTimeSection
+                        }
                     }
                 }
                 .padding()
