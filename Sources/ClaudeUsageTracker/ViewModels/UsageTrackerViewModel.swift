@@ -800,6 +800,23 @@ final class UsageTrackerViewModel: ObservableObject {
         }
     }
 
+    // Fast byte-level substring search (avoids String conversion)
+    nonisolated private func containsSequence(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
+        guard needle.count <= haystack.count else { return false }
+        let limit = haystack.count - needle.count
+        for i in 0...limit {
+            var match = true
+            for j in 0..<needle.count {
+                if haystack[i + j] != needle[j] {
+                    match = false
+                    break
+                }
+            }
+            if match { return true }
+        }
+        return false
+    }
+
     // Parse ALL transcripts in a directory with GLOBAL deduplication by message ID
     // Uses caching to avoid re-parsing unchanged directories
     nonisolated private func parseTranscriptsInDirectory(_ directory: String) -> TranscriptUsage {
@@ -842,151 +859,111 @@ final class UsageTrackerViewModel: ObservableObject {
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
         let todayStart = calendar.startOfDay(for: now)
 
+        // Pre-compute byte sequences for fast filtering before JSON parse
+        let assistantMarker = Array("\"assistant\"".utf8)
+        let usageMarker = Array("\"usage\"".utf8)
+
         for file in jsonlFiles {
             let fullPath = "\(directory)/\(file)"
             guard let fileHandle = FileHandle(forReadingAtPath: fullPath) else { continue }
             defer { fileHandle.closeFile() }
 
-            let bufferSize = 256 * 1024 // 256 KB chunks
-            var remainder = Data()
+            let bufferSize = 512 * 1024 // 512 KB chunks
+            var buffer = Data()
+            var searchStart = 0
 
             while true {
                 let chunk = fileHandle.readData(ofLength: bufferSize)
                 if chunk.isEmpty { break }
+                buffer.append(chunk)
 
-                remainder.append(chunk)
-
-                // Split on newlines
-                while let newlineRange = remainder.range(of: Data([0x0A])) {
-                    let lineData = remainder.subdata(in: remainder.startIndex..<newlineRange.lowerBound)
-                    remainder.removeSubrange(remainder.startIndex...newlineRange.lowerBound)
-
-                    guard !lineData.isEmpty,
-                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                          json["type"] as? String == "assistant",
-                          let message = json["message"] as? [String: Any],
-                          let messageId = message["id"] as? String else { continue }
-
-                    let model = message["model"] as? String ?? "unknown"
-                    let isBedrock = messageId.hasPrefix("msg_bdrk_")
-
-                    var isThisMonth = false
-                    var isToday = false
-                    var messageDate: Date?
-                    if let timestamp = json["timestamp"] as? String {
-                        let formatter = ISO8601DateFormatter()
-                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        var date = formatter.date(from: timestamp)
-                        if date == nil {
-                            formatter.formatOptions = [.withInternetDateTime]
-                            date = formatter.date(from: timestamp)
-                        }
-                        if let date = date {
-                            isThisMonth = date >= monthStart
-                            isToday = date >= todayStart
-                            messageDate = date
-                        }
+                // Process complete lines from buffer
+                while searchStart < buffer.count {
+                    guard let newlineIndex = buffer[searchStart...].firstIndex(of: 0x0A) else {
+                        break // No more complete lines in buffer
                     }
 
-                    var thinkingChars = 0
-                    if let content = message["content"] as? [[String: Any]] {
-                        for block in content {
-                            if block["type"] as? String == "thinking",
-                               let thinking = block["thinking"] as? String {
-                                thinkingChars += thinking.count
+                    let lineRange = searchStart..<newlineIndex
+                    let nextStart = newlineIndex + 1
+
+                    // Fast filter: skip lines that don't contain "assistant" or "usage"
+                    let lineBytes = Array(buffer[lineRange])
+                    let hasAssistant = lineBytes.count > 20 && containsSequence(lineBytes, assistantMarker)
+
+                    if hasAssistant && containsSequence(lineBytes, usageMarker) {
+                        // Only parse JSON for lines that likely have assistant messages with usage
+                        autoreleasepool {
+                            let lineData = buffer.subdata(in: lineRange)
+                            guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                                  json["type"] as? String == "assistant",
+                                  let message = json["message"] as? [String: Any],
+                                  let messageId = message["id"] as? String,
+                                  let usageData = message["usage"] as? [String: Any] else { return }
+
+                            let model = message["model"] as? String ?? "unknown"
+                            let isBedrock = messageId.hasPrefix("msg_bdrk_")
+
+                            var isThisMonth = false
+                            var isToday = false
+                            var messageDate: Date?
+                            if let timestamp = json["timestamp"] as? String {
+                                let formatter = ISO8601DateFormatter()
+                                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                                var date = formatter.date(from: timestamp)
+                                if date == nil {
+                                    formatter.formatOptions = [.withInternetDateTime]
+                                    date = formatter.date(from: timestamp)
+                                }
+                                if let date = date {
+                                    isThisMonth = date >= monthStart
+                                    isToday = date >= todayStart
+                                    messageDate = date
+                                }
                             }
-                        }
+
+                            var thinkingChars = 0
+                            if let content = message["content"] as? [[String: Any]] {
+                                for block in content {
+                                    if block["type"] as? String == "thinking",
+                                       let thinking = block["thinking"] as? String {
+                                        thinkingChars += thinking.count
+                                    }
+                                }
+                            }
+                            let thinkingTokens = Int(Double(thinkingChars) / 2.5)
+                            let existingThinking = thinkingTokensMap[messageId] ?? 0
+                            thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
+
+                            let hasServiceTier = usageData["service_tier"] != nil
+                            let isClaudeAPI = !isBedrock && !hasServiceTier
+                            let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
+
+                            let entry = MessageEntry(
+                                model: model,
+                                isBedrock: isBedrock,
+                                isClaudeAPI: isClaudeAPI,
+                                isThisMonth: isThisMonth,
+                                isToday: isToday,
+                                messageDate: messageDate,
+                                input: usageData["input_tokens"] as? Int ?? 0,
+                                output: usageData["output_tokens"] as? Int ?? 0,
+                                thinkingTokens: finalThinkingTokens,
+                                cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
+                                cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
+                            )
+                            globalMessageMap[messageId] = entry
+                        } // autoreleasepool
                     }
-                    let thinkingTokens = Int(Double(thinkingChars) / 2.5)
-                    let existingThinking = thinkingTokensMap[messageId] ?? 0
-                    thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
 
-                    if let usageData = message["usage"] as? [String: Any] {
-                        let hasServiceTier = usageData["service_tier"] != nil
-                        let isClaudeAPI = !isBedrock && !hasServiceTier
-
-                        let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
-
-                        let entry = MessageEntry(
-                            model: model,
-                            isBedrock: isBedrock,
-                            isClaudeAPI: isClaudeAPI,
-                            isThisMonth: isThisMonth,
-                            isToday: isToday,
-                            messageDate: messageDate,
-                            input: usageData["input_tokens"] as? Int ?? 0,
-                            output: usageData["output_tokens"] as? Int ?? 0,
-                            thinkingTokens: finalThinkingTokens,
-                            cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
-                            cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
-                        )
-                        globalMessageMap[messageId] = entry
-                    }
-                } // while newlineRange
-            } // while true (chunk reading)
-
-            // Process any remaining data after last newline
-            if !remainder.isEmpty,
-               let json = try? JSONSerialization.jsonObject(with: remainder) as? [String: Any],
-               json["type"] as? String == "assistant",
-               let message = json["message"] as? [String: Any],
-               let messageId = message["id"] as? String {
-
-                let model = message["model"] as? String ?? "unknown"
-                let isBedrock = messageId.hasPrefix("msg_bdrk_")
-
-                var isThisMonth = false
-                var isToday = false
-                var messageDate: Date?
-                if let timestamp = json["timestamp"] as? String {
-                    let formatter = ISO8601DateFormatter()
-                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                    var date = formatter.date(from: timestamp)
-                    if date == nil {
-                        formatter.formatOptions = [.withInternetDateTime]
-                        date = formatter.date(from: timestamp)
-                    }
-                    if let date = date {
-                        isThisMonth = date >= monthStart
-                        isToday = date >= todayStart
-                        messageDate = date
-                    }
+                    searchStart = nextStart
                 }
 
-                var thinkingChars = 0
-                if let content = message["content"] as? [[String: Any]] {
-                    for block in content {
-                        if block["type"] as? String == "thinking",
-                           let thinking = block["thinking"] as? String {
-                            thinkingChars += thinking.count
-                        }
-                    }
+                // Compact: remove processed bytes from buffer
+                if searchStart > 0 {
+                    buffer.removeSubrange(0..<searchStart)
+                    searchStart = 0
                 }
-                let thinkingTokens = Int(Double(thinkingChars) / 2.5)
-                let existingThinking = thinkingTokensMap[messageId] ?? 0
-                thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
-
-                if let usageData = message["usage"] as? [String: Any] {
-                    let hasServiceTier = usageData["service_tier"] != nil
-                    let isClaudeAPI = !isBedrock && !hasServiceTier
-                    let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
-
-                    let entry = MessageEntry(
-                        model: model,
-                        isBedrock: isBedrock,
-                        isClaudeAPI: isClaudeAPI,
-                        isThisMonth: isThisMonth,
-                        isToday: isToday,
-                        messageDate: messageDate,
-                        input: usageData["input_tokens"] as? Int ?? 0,
-                        output: usageData["output_tokens"] as? Int ?? 0,
-                        thinkingTokens: finalThinkingTokens,
-                        cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
-                        cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
-                    )
-                    globalMessageMap[messageId] = entry
-                }
-            }
+            } // while reading chunks
         } // for file in jsonlFiles
 
         // Accumulate from globally deduplicated messages

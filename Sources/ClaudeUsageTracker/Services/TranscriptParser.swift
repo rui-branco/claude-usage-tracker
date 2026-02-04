@@ -136,8 +136,21 @@ final class TranscriptParser: @unchecked Sendable {
         return usage
     }
 
-    /// Process a line of JSON data and update message maps
-    /// Returns true if the line was processed
+    /// Fast byte-level substring search
+    private func containsSequence(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
+        guard needle.count <= haystack.count else { return false }
+        let limit = haystack.count - needle.count
+        for i in 0...limit {
+            var match = true
+            for j in 0..<needle.count {
+                if haystack[i + j] != needle[j] { match = false; break }
+            }
+            if match { return true }
+        }
+        return false
+    }
+
+    /// Process a line of JSON data inside autoreleasepool, updating message maps
     private func processJsonLine(
         _ lineData: Data,
         monthStart: Date,
@@ -149,7 +162,8 @@ final class TranscriptParser: @unchecked Sendable {
               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
               json["type"] as? String == "assistant",
               let message = json["message"] as? [String: Any],
-              let messageId = message["id"] as? String else { return }
+              let messageId = message["id"] as? String,
+              let usageData = message["usage"] as? [String: Any] else { return }
 
         let model = message["model"] as? String ?? "unknown"
         let isBedrock = messageId.hasPrefix("msg_bdrk_")
@@ -185,27 +199,25 @@ final class TranscriptParser: @unchecked Sendable {
         let existingThinking = thinkingTokensMap[messageId] ?? 0
         thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
 
-        if let usageData = message["usage"] as? [String: Any] {
-            let hasServiceTier = usageData["service_tier"] != nil
-            let isClaudeAPI = !isBedrock && !hasServiceTier
-            let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
+        let hasServiceTier = usageData["service_tier"] != nil
+        let isClaudeAPI = !isBedrock && !hasServiceTier
+        let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
 
-            let entry = StreamedMessageEntry(
-                model: model,
-                messageId: messageId,
-                isBedrock: isBedrock,
-                isClaudeAPI: isClaudeAPI,
-                isThisMonth: isThisMonth,
-                isToday: isToday,
-                messageDate: messageDate,
-                input: usageData["input_tokens"] as? Int ?? 0,
-                output: usageData["output_tokens"] as? Int ?? 0,
-                thinkingTokens: finalThinkingTokens,
-                cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
-                cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
-            )
-            messageMap[messageId] = entry
-        }
+        let entry = StreamedMessageEntry(
+            model: model,
+            messageId: messageId,
+            isBedrock: isBedrock,
+            isClaudeAPI: isClaudeAPI,
+            isThisMonth: isThisMonth,
+            isToday: isToday,
+            messageDate: messageDate,
+            input: usageData["input_tokens"] as? Int ?? 0,
+            output: usageData["output_tokens"] as? Int ?? 0,
+            thinkingTokens: finalThinkingTokens,
+            cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
+            cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
+        )
+        messageMap[messageId] = entry
     }
 
     /// Stream lines from a FileHandle and accumulate usage data
@@ -219,28 +231,41 @@ final class TranscriptParser: @unchecked Sendable {
         var messageMap: [String: StreamedMessageEntry] = [:]
         var thinkingTokensMap: [String: Int] = [:]
 
-        let bufferSize = 256 * 1024 // 256 KB chunks
-        var remainder = Data()
+        let assistantMarker = Array("\"assistant\"".utf8)
+        let usageMarker = Array("\"usage\"".utf8)
+
+        let bufferSize = 512 * 1024 // 512 KB chunks
+        var buffer = Data()
+        var searchStart = 0
 
         while true {
             let chunk = fileHandle.readData(ofLength: bufferSize)
             if chunk.isEmpty { break }
+            buffer.append(chunk)
 
-            remainder.append(chunk)
+            while searchStart < buffer.count {
+                guard let newlineIndex = buffer[searchStart...].firstIndex(of: 0x0A) else { break }
 
-            while let newlineRange = remainder.range(of: Data([0x0A])) {
-                let lineData = remainder.subdata(in: remainder.startIndex..<newlineRange.lowerBound)
-                remainder.removeSubrange(remainder.startIndex...newlineRange.lowerBound)
+                let lineRange = searchStart..<newlineIndex
+                let nextStart = newlineIndex + 1
+                let lineBytes = Array(buffer[lineRange])
 
-                processJsonLine(lineData, monthStart: monthStart, todayStart: todayStart,
-                              messageMap: &messageMap, thinkingTokensMap: &thinkingTokensMap)
+                if lineBytes.count > 20 && containsSequence(lineBytes, assistantMarker) && containsSequence(lineBytes, usageMarker) {
+                    autoreleasepool {
+                        let lineData = buffer.subdata(in: lineRange)
+                        processJsonLine(lineData, monthStart: monthStart, todayStart: todayStart,
+                                      messageMap: &messageMap, thinkingTokensMap: &thinkingTokensMap)
+                    }
+                }
+
+                searchStart = nextStart
             }
-        }
 
-        // Process remainder after last newline
-        if !remainder.isEmpty {
-            processJsonLine(remainder, monthStart: monthStart, todayStart: todayStart,
-                          messageMap: &messageMap, thinkingTokensMap: &thinkingTokensMap)
+            // Compact buffer
+            if searchStart > 0 {
+                buffer.removeSubrange(0..<searchStart)
+                searchStart = 0
+            }
         }
 
         // Accumulate from deduplicated messages
