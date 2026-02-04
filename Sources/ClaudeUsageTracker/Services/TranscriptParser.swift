@@ -73,6 +73,22 @@ struct TranscriptUsage {
     }
 }
 
+/// Message entry used during streaming line-by-line parsing
+struct StreamedMessageEntry {
+    let model: String
+    let messageId: String
+    let isBedrock: Bool
+    let isClaudeAPI: Bool
+    let isThisMonth: Bool
+    let isToday: Bool
+    let messageDate: Date?
+    let input: Int
+    let output: Int
+    let thinkingTokens: Int
+    let cacheCreate: Int
+    let cacheRead: Int
+}
+
 final class TranscriptParser: @unchecked Sendable {
     private let fileManager = FileManager.default
 
@@ -91,7 +107,7 @@ final class TranscriptParser: @unchecked Sendable {
     }
 
     /// Parse transcript file and calculate total usage
-    /// For large files, reads only the last portion to avoid memory issues
+    /// Streams file line-by-line to avoid loading entire file into memory
     func parseTranscript(at path: String) -> TranscriptUsage {
         var usage = TranscriptUsage()
 
@@ -99,183 +115,152 @@ final class TranscriptParser: @unchecked Sendable {
             return usage
         }
 
-        // For simplicity and speed, read file using shell command for large files
-        // This avoids Swift FileHandle issues with large files
-        let maxBytes = 10 * 1024 * 1024 // 10MB max
+        guard let fileHandle = FileHandle(forReadingAtPath: path) else {
+            return usage
+        }
+        defer { fileHandle.closeFile() }
 
+        // For large files, seek to last 10MB
+        let maxBytes = 10 * 1024 * 1024
         do {
             let attrs = try fileManager.attributesOfItem(atPath: path)
             let fileSize = attrs[.size] as? Int ?? 0
-
-            let content: String
             if fileSize > maxBytes {
-                // Large file - use tail to read last 10MB
-                let task = Process()
-                task.executableURL = URL(fileURLWithPath: "/usr/bin/tail")
-                task.arguments = ["-c", "\(maxBytes)", path]
-
-                let pipe = Pipe()
-                task.standardOutput = pipe
-                task.standardError = FileHandle.nullDevice
-
-                try task.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                task.waitUntilExit()
-
-                content = String(data: data, encoding: .utf8) ?? ""
-            } else {
-                // Small file - read all
-                guard let data = fileManager.contents(atPath: path),
-                      let str = String(data: data, encoding: .utf8) else {
-                    return usage
-                }
-                content = str
+                fileHandle.seek(toFileOffset: UInt64(fileSize - maxBytes))
             }
-
-            parseLines(content, into: &usage)
         } catch {
             return usage
         }
 
+        parseStreamedLines(fileHandle: fileHandle, into: &usage)
         return usage
     }
 
-    /// Parse lines and accumulate usage data
-    /// IMPORTANT: Messages appear multiple times due to streaming - deduplicate by message ID
-    private func parseLines(_ content: String, into usage: inout TranscriptUsage) {
-        let lines = content.components(separatedBy: "\n")
+    /// Process a line of JSON data and update message maps
+    /// Returns true if the line was processed
+    private func processJsonLine(
+        _ lineData: Data,
+        monthStart: Date,
+        todayStart: Date,
+        messageMap: inout [String: StreamedMessageEntry],
+        thinkingTokensMap: inout [String: Int]
+    ) {
+        guard !lineData.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+              json["type"] as? String == "assistant",
+              let message = json["message"] as? [String: Any],
+              let messageId = message["id"] as? String else { return }
 
-        // Get start of current month and today (in UTC to match transcript timestamps)
+        let model = message["model"] as? String ?? "unknown"
+        let isBedrock = messageId.hasPrefix("msg_bdrk_")
+
+        var isThisMonth = false
+        var isToday = false
+        var messageDate: Date?
+        if let timestamp = json["timestamp"] as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var date = formatter.date(from: timestamp)
+            if date == nil {
+                formatter.formatOptions = [.withInternetDateTime]
+                date = formatter.date(from: timestamp)
+            }
+            if let date = date {
+                isThisMonth = date >= monthStart
+                isToday = date >= todayStart
+                messageDate = date
+            }
+        }
+
+        var thinkingChars = 0
+        if let content = message["content"] as? [[String: Any]] {
+            for block in content {
+                if block["type"] as? String == "thinking",
+                   let thinking = block["thinking"] as? String {
+                    thinkingChars += thinking.count
+                }
+            }
+        }
+        let thinkingTokens = Int(Double(thinkingChars) / 2.5)
+        let existingThinking = thinkingTokensMap[messageId] ?? 0
+        thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
+
+        if let usageData = message["usage"] as? [String: Any] {
+            let hasServiceTier = usageData["service_tier"] != nil
+            let isClaudeAPI = !isBedrock && !hasServiceTier
+            let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
+
+            let entry = StreamedMessageEntry(
+                model: model,
+                messageId: messageId,
+                isBedrock: isBedrock,
+                isClaudeAPI: isClaudeAPI,
+                isThisMonth: isThisMonth,
+                isToday: isToday,
+                messageDate: messageDate,
+                input: usageData["input_tokens"] as? Int ?? 0,
+                output: usageData["output_tokens"] as? Int ?? 0,
+                thinkingTokens: finalThinkingTokens,
+                cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
+                cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
+            )
+            messageMap[messageId] = entry
+        }
+    }
+
+    /// Stream lines from a FileHandle and accumulate usage data
+    private func parseStreamedLines(fileHandle: FileHandle, into usage: inout TranscriptUsage) {
         var calendar = Calendar.current
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let now = Date()
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
         let todayStart = calendar.startOfDay(for: now)
 
-        // First pass: collect final version of each message (by ID)
-        // Messages stream incrementally - only the LAST entry per ID has final token counts
-        struct MessageEntry {
-            let model: String
-            let messageId: String
-            let isBedrock: Bool
-            let isClaudeAPI: Bool  // Direct Claude API (no service_tier, not Bedrock)
-            let isThisMonth: Bool
-            let isToday: Bool
-            let messageDate: Date?  // For time-based pricing
-            let input: Int
-            let output: Int
-            let thinkingTokens: Int  // Estimated from thinking content (not in output_tokens)
-            let cacheCreate: Int
-            let cacheRead: Int
-        }
-        var messageMap: [String: MessageEntry] = [:]
-        var thinkingTokensMap: [String: Int] = [:]  // Track max thinking tokens per message ID
+        var messageMap: [String: StreamedMessageEntry] = [:]
+        var thinkingTokensMap: [String: Int] = [:]
 
-        for line in lines {
-            guard !line.isEmpty,
-                  let lineData = line.data(using: .utf8) else { continue }
+        let bufferSize = 256 * 1024 // 256 KB chunks
+        var remainder = Data()
 
-            do {
-                if let json = try JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                   json["type"] as? String == "assistant",
-                   let message = json["message"] as? [String: Any],
-                   let messageId = message["id"] as? String {
+        while true {
+            let chunk = fileHandle.readData(ofLength: bufferSize)
+            if chunk.isEmpty { break }
 
-                    let model = message["model"] as? String ?? "unknown"
-                    let isBedrock = messageId.hasPrefix("msg_bdrk_")
+            remainder.append(chunk)
 
-                    // Extract timestamp
-                    var isThisMonth = false
-                    var isToday = false
-                    var messageDate: Date?
-                    if let timestamp = json["timestamp"] as? String {
-                        let formatter = ISO8601DateFormatter()
-                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        var date = formatter.date(from: timestamp)
-                        if date == nil {
-                            formatter.formatOptions = [.withInternetDateTime]
-                            date = formatter.date(from: timestamp)
-                        }
-                        if let date = date {
-                            isThisMonth = date >= monthStart
-                            isToday = date >= todayStart
-                            messageDate = date
-                        }
-                    }
+            while let newlineRange = remainder.range(of: Data([0x0A])) {
+                let lineData = remainder.subdata(in: remainder.startIndex..<newlineRange.lowerBound)
+                remainder.removeSubrange(remainder.startIndex...newlineRange.lowerBound)
 
-                    // Extract thinking tokens from content (not included in output_tokens)
-                    // IMPORTANT: Thinking content only appears in early streaming entries,
-                    // so we track the MAX thinking tokens seen for each message ID
-                    var thinkingChars = 0
-                    if let content = message["content"] as? [[String: Any]] {
-                        for block in content {
-                            if block["type"] as? String == "thinking",
-                               let thinking = block["thinking"] as? String {
-                                thinkingChars += thinking.count
-                            }
-                        }
-                    }
-                    // Estimate tokens: ~2.5 chars per token for English
-                    let thinkingTokens = Int(Double(thinkingChars) / 2.5)
-                    // Keep max thinking tokens seen (early entries have thinking, later entries don't)
-                    let existingThinking = thinkingTokensMap[messageId] ?? 0
-                    thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
-
-                    // Extract usage and detect API type
-                    if let usageData = message["usage"] as? [String: Any] {
-                        // Detect direct Claude API: no service_tier and not Bedrock
-                        // Subscription has service_tier: "standard"
-                        // Bedrock has msg_bdrk_ prefix
-                        // Direct API has neither
-                        let hasServiceTier = usageData["service_tier"] != nil
-                        let isClaudeAPI = !isBedrock && !hasServiceTier
-
-                        // Use max thinking tokens from all entries for this message
-                        let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
-
-                        let entry = MessageEntry(
-                            model: model,
-                            messageId: messageId,
-                            isBedrock: isBedrock,
-                            isClaudeAPI: isClaudeAPI,
-                            isThisMonth: isThisMonth,
-                            isToday: isToday,
-                            messageDate: messageDate,
-                            input: usageData["input_tokens"] as? Int ?? 0,
-                            output: usageData["output_tokens"] as? Int ?? 0,
-                            thinkingTokens: finalThinkingTokens,
-                            cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
-                            cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
-                        )
-                        // Keep last entry per message ID (has final token count, but use max thinking)
-                        messageMap[messageId] = entry
-                    }
-                }
-            } catch {
-                continue
+                processJsonLine(lineData, monthStart: monthStart, todayStart: todayStart,
+                              messageMap: &messageMap, thinkingTokensMap: &thinkingTokensMap)
             }
         }
 
-        // Second pass: accumulate from deduplicated messages
+        // Process remainder after last newline
+        if !remainder.isEmpty {
+            processJsonLine(remainder, monthStart: monthStart, todayStart: todayStart,
+                          messageMap: &messageMap, thinkingTokensMap: &thinkingTokensMap)
+        }
+
+        // Accumulate from deduplicated messages
+        accumulateMessages(messageMap, into: &usage)
+    }
+
+    /// Accumulate deduplicated messages into usage
+    private func accumulateMessages(_ messageMap: [String: StreamedMessageEntry], into usage: inout TranscriptUsage) {
         let pricingService = PricingService.shared
 
         for (_, entry) in messageMap {
             usage.model = entry.model
-            if entry.isBedrock {
-                usage.isBedrock = true
-            }
-            if entry.isClaudeAPI {
-                usage.isClaudeAPI = true
-            }
+            if entry.isBedrock { usage.isBedrock = true }
+            if entry.isClaudeAPI { usage.isClaudeAPI = true }
 
-            // Accumulate totals (include thinking tokens in output for display)
             usage.inputTokens += entry.input
             usage.outputTokens += entry.output + entry.thinkingTokens
             usage.cacheCreationTokens += entry.cacheCreate
             usage.cacheReadTokens += entry.cacheRead
 
-            // Calculate cost using pricing for this message's date
-            // Thinking tokens are billed at same rate as output tokens
             let messageCost = pricingService.calculateCost(
                 inputTokens: entry.input,
                 outputTokens: entry.output + entry.thinkingTokens,
@@ -286,7 +271,6 @@ final class TranscriptParser: @unchecked Sendable {
             )
             usage.calculatedCost += messageCost
 
-            // Track per-model usage (include thinking in output)
             var modelData = usage.modelUsage[entry.model] ?? ModelUsageData()
             modelData.inputTokens += entry.input
             modelData.outputTokens += entry.output + entry.thinkingTokens
@@ -294,13 +278,11 @@ final class TranscriptParser: @unchecked Sendable {
             modelData.cacheReadTokens += entry.cacheRead
             usage.modelUsage[entry.model] = modelData
 
-            // Track monthly usage
             if entry.isThisMonth {
                 usage.monthlyInputTokens += entry.input
                 usage.monthlyOutputTokens += entry.output + entry.thinkingTokens
                 usage.monthlyCacheCreationTokens += entry.cacheCreate
                 usage.monthlyCacheReadTokens += entry.cacheRead
-                // Only count paid API messages for monthly cost
                 if entry.isBedrock || entry.isClaudeAPI {
                     usage.calculatedMonthlyCost += messageCost
                 }
@@ -313,13 +295,11 @@ final class TranscriptParser: @unchecked Sendable {
                 usage.monthlyModelUsage[entry.model] = monthlyModelData
             }
 
-            // Track daily usage (today)
             if entry.isToday {
                 usage.dailyInputTokens += entry.input
                 usage.dailyOutputTokens += entry.output + entry.thinkingTokens
                 usage.dailyCacheCreationTokens += entry.cacheCreate
                 usage.dailyCacheReadTokens += entry.cacheRead
-                // Only count paid API messages for daily cost
                 if entry.isBedrock || entry.isClaudeAPI {
                     usage.calculatedDailyCost += messageCost
                 }

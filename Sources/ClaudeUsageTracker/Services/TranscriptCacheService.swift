@@ -10,6 +10,8 @@ struct CachedDirectoryData: Codable {
     let monthKey: String
     /// Day key for daily data (YYYY-MM-DD)
     let dayKey: String?
+    /// When this directory was last parsed (for throttling)
+    let lastParsedTime: Date?
 
     // Aggregated usage data
     let inputTokens: Int
@@ -148,8 +150,12 @@ final class TranscriptCacheService: @unchecked Sendable {
             return true
         }
 
-        // Re-parse if any file was modified
+        // Re-parse if any file was modified, but throttle to max once per 30 seconds
         if info.latestMod > cached.latestFileModification {
+            if let lastParsed = cached.lastParsedTime,
+               Date().timeIntervalSince(lastParsed) < 30 {
+                return false // Throttled: parsed too recently
+            }
             return true
         }
 
@@ -175,6 +181,7 @@ final class TranscriptCacheService: @unchecked Sendable {
             fileCount: info.fileCount,
             monthKey: currentMonthKey(),
             dayKey: currentDayKey(),
+            lastParsedTime: Date(),
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             cacheCreationTokens: usage.cacheCreationTokens,

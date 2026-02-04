@@ -86,8 +86,7 @@ final class UsageTrackerViewModel: ObservableObject {
         loadFromCache()
 
         // Then update in background
-        updateAPICosts()
-        updateLiveSessions()
+        updateTranscriptData()
 
         // Fetch rate limit usage from API
         fetchUsageFromAPI()
@@ -95,7 +94,7 @@ final class UsageTrackerViewModel: ObservableObject {
         // Set up periodic refresh of usage data (every 60 seconds)
         setupUsageRefreshTimer()
 
-        // Set up periodic refresh of API costs (every 5 seconds)
+        // Set up periodic refresh of API costs (every 30 seconds)
         setupAPICostRefreshTimer()
     }
 
@@ -111,10 +110,9 @@ final class UsageTrackerViewModel: ObservableObject {
     }
 
     private func setupAPICostRefreshTimer() {
-        apiCostRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        apiCostRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.updateAPICosts()
-                self?.updateLiveSessions()
+                self?.updateTranscriptData()
             }
         }
     }
@@ -262,10 +260,8 @@ final class UsageTrackerViewModel: ObservableObject {
                 self?.claudeConfig = config
                 // Re-enrich sessions when config updates
                 self?.refreshEnrichedSessions()
-                // Calculate API costs from transcripts (runs in background)
-                self?.updateAPICosts()
-                // Update live sessions with accurate transcript data
-                self?.updateLiveSessions()
+                // Update transcript data (costs + live sessions) in background
+                self?.updateTranscriptData()
             }
             .store(in: &cancellables)
 
@@ -660,20 +656,20 @@ final class UsageTrackerViewModel: ObservableObject {
 
     @Published private var cachedLiveSessions: [LiveSession] = []
 
-    private var isUpdatingLiveSessions = false
+    private var isUpdatingTranscriptData = false
 
-    // Update live sessions with accurate data from transcripts
-    // Scans ALL project directories, not just those in config
-    private func updateLiveSessions() {
-        // Prevent duplicate parallel execution
-        guard !isUpdatingLiveSessions else { return }
-        isUpdatingLiveSessions = true
+    // Single pass: update both live sessions and API costs from transcripts
+    // Scans ALL project directories once, producing both results
+    private func updateTranscriptData() {
+        guard !isUpdatingTranscriptData else { return }
+        isUpdatingTranscriptData = true
 
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             defer {
                 Task { @MainActor in
-                    self.isUpdatingLiveSessions = false
+                    self.isUpdatingTranscriptData = false
+                    self.isLoadingAPICosts = false
                 }
             }
 
@@ -681,17 +677,23 @@ final class UsageTrackerViewModel: ObservableObject {
             let projectsDir = "\(homeDir)/.claude/projects"
 
             guard FileManager.default.fileExists(atPath: projectsDir) else {
-                await MainActor.run { self.cachedLiveSessions = [] }
+                await MainActor.run {
+                    self.cachedLiveSessions = []
+                    self.cachedCostBreakdown = APICostBreakdown()
+                    MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.dailyApiCost = nil
+                    MenuBarState.shared.apiType = .none
+                }
                 return
             }
 
             var sessions: [LiveSession] = []
+            var breakdown = APICostBreakdown()
 
             do {
                 let directories = try FileManager.default.contentsOfDirectory(atPath: projectsDir)
 
                 for dir in directories {
-                    // Skip hidden files
                     guard !dir.hasPrefix(".") else { continue }
 
                     let fullDirPath = "\(projectsDir)/\(dir)"
@@ -699,28 +701,21 @@ final class UsageTrackerViewModel: ObservableObject {
                     guard FileManager.default.fileExists(atPath: fullDirPath, isDirectory: &isDirectory),
                           isDirectory.boolValue else { continue }
 
-                    // Get project name - extract after "WebstormProjects-" or use last meaningful segment
+                    // Parse transcripts once
+                    let usage = self.parseTranscriptsInDirectory(fullDirPath)
+                    guard usage.totalTokens > 0 else { continue }
+
+                    // --- Live sessions ---
                     let projectName: String
                     if let range = dir.range(of: "WebstormProjects-") {
                         projectName = String(dir[range.upperBound...])
                     } else if let range = dir.range(of: "branco-") {
                         projectName = String(dir[range.upperBound...])
                     } else {
-                        // Fallback: use last 2-3 components for readability
                         let components = dir.components(separatedBy: "-")
                         projectName = components.suffix(3).joined(separator: "-")
                     }
 
-                    // Parse transcripts directly from directory
-                    let usage = self.parseTranscriptsInDirectory(fullDirPath)
-
-                    // Skip projects with no usage
-                    guard usage.totalTokens > 0 else { continue }
-
-                    // Detect API type from transcript
-                    // Bedrock: msg_bdrk_ message IDs
-                    // Claude API: no service_tier field (direct ANTHROPIC_API_KEY usage)
-                    // Subscription: has service_tier field
                     let detectedAPIType: APIType
                     if usage.hasBedrock {
                         detectedAPIType = .bedrock
@@ -730,7 +725,6 @@ final class UsageTrackerViewModel: ObservableObject {
                         detectedAPIType = .subscription
                     }
 
-                    // Calculate cost only for paid API projects
                     let totalCost = usage.isPaidAPI ? usage.calculateCost() : 0
 
                     sessions.append(LiveSession(
@@ -742,12 +736,28 @@ final class UsageTrackerViewModel: ObservableObject {
                         isActive: true,
                         apiType: detectedAPIType
                     ))
+
+                    // --- API cost breakdown ---
+                    if usage.isPaidAPI {
+                        let projectTotal = usage.calculateCost()
+                        let projectMonthly = usage.calculateMonthlyCost()
+                        let projectDaily = usage.calculatedDailyCost
+
+                        if usage.hasBedrock {
+                            breakdown.bedrockTotal += projectTotal
+                            breakdown.bedrockMonthly += projectMonthly
+                            breakdown.bedrockDaily += projectDaily
+                        } else if usage.hasClaudeAPI {
+                            breakdown.claudeAPITotal += projectTotal
+                            breakdown.claudeAPIMonthly += projectMonthly
+                            breakdown.claudeAPIDaily += projectDaily
+                        }
+                    }
                 }
             } catch {
                 // Ignore errors
             }
 
-            // Sort: API projects first (by cost), then subscription (by tokens)
             let sorted = sessions.sorted {
                 if $0.isAPI && !$1.isAPI { return true }
                 if !$0.isAPI && $1.isAPI { return false }
@@ -755,9 +765,37 @@ final class UsageTrackerViewModel: ObservableObject {
                 return $0.lastTokens > $1.lastTokens
             }
 
+            let finalBreakdown = breakdown
+
             await MainActor.run {
+                // Update live sessions
                 self.cachedLiveSessions = sorted
+
+                // Update API cost breakdown
+                self.cachedCostBreakdown = finalBreakdown
+
+                let monthlyCost = finalBreakdown.totalMonthly
+                let dailyCost = finalBreakdown.totalDaily
+                if monthlyCost > 0 || dailyCost > 0 {
+                    MenuBarState.shared.apiCost = monthlyCost
+                    MenuBarState.shared.dailyApiCost = dailyCost
+                    if finalBreakdown.hasMultiple {
+                        MenuBarState.shared.apiType = .mixed
+                    } else if finalBreakdown.hasBedrock {
+                        MenuBarState.shared.apiType = .bedrock
+                    } else if finalBreakdown.hasClaudeAPI {
+                        MenuBarState.shared.apiType = .claudeAPI
+                    } else {
+                        MenuBarState.shared.apiType = .unknown
+                    }
+                } else {
+                    MenuBarState.shared.apiCost = nil
+                    MenuBarState.shared.dailyApiCost = nil
+                    MenuBarState.shared.apiType = .none
+                }
+
                 self.saveToCache()
+                TranscriptCacheService.shared.saveCache()
             }
         }
     }
@@ -806,17 +844,93 @@ final class UsageTrackerViewModel: ObservableObject {
 
         for file in jsonlFiles {
             let fullPath = "\(directory)/\(file)"
-            guard let data = FileManager.default.contents(atPath: fullPath),
-                  let content = String(data: data, encoding: .utf8) else { continue }
+            guard let fileHandle = FileHandle(forReadingAtPath: fullPath) else { continue }
+            defer { fileHandle.closeFile() }
 
-            let lines = content.components(separatedBy: "\n")
-            for line in lines {
-                guard !line.isEmpty,
-                      let lineData = line.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                      json["type"] as? String == "assistant",
-                      let message = json["message"] as? [String: Any],
-                      let messageId = message["id"] as? String else { continue }
+            let bufferSize = 256 * 1024 // 256 KB chunks
+            var remainder = Data()
+
+            while true {
+                let chunk = fileHandle.readData(ofLength: bufferSize)
+                if chunk.isEmpty { break }
+
+                remainder.append(chunk)
+
+                // Split on newlines
+                while let newlineRange = remainder.range(of: Data([0x0A])) {
+                    let lineData = remainder.subdata(in: remainder.startIndex..<newlineRange.lowerBound)
+                    remainder.removeSubrange(remainder.startIndex...newlineRange.lowerBound)
+
+                    guard !lineData.isEmpty,
+                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                          json["type"] as? String == "assistant",
+                          let message = json["message"] as? [String: Any],
+                          let messageId = message["id"] as? String else { continue }
+
+                    let model = message["model"] as? String ?? "unknown"
+                    let isBedrock = messageId.hasPrefix("msg_bdrk_")
+
+                    var isThisMonth = false
+                    var isToday = false
+                    var messageDate: Date?
+                    if let timestamp = json["timestamp"] as? String {
+                        let formatter = ISO8601DateFormatter()
+                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        var date = formatter.date(from: timestamp)
+                        if date == nil {
+                            formatter.formatOptions = [.withInternetDateTime]
+                            date = formatter.date(from: timestamp)
+                        }
+                        if let date = date {
+                            isThisMonth = date >= monthStart
+                            isToday = date >= todayStart
+                            messageDate = date
+                        }
+                    }
+
+                    var thinkingChars = 0
+                    if let content = message["content"] as? [[String: Any]] {
+                        for block in content {
+                            if block["type"] as? String == "thinking",
+                               let thinking = block["thinking"] as? String {
+                                thinkingChars += thinking.count
+                            }
+                        }
+                    }
+                    let thinkingTokens = Int(Double(thinkingChars) / 2.5)
+                    let existingThinking = thinkingTokensMap[messageId] ?? 0
+                    thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
+
+                    if let usageData = message["usage"] as? [String: Any] {
+                        let hasServiceTier = usageData["service_tier"] != nil
+                        let isClaudeAPI = !isBedrock && !hasServiceTier
+
+                        let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
+
+                        let entry = MessageEntry(
+                            model: model,
+                            isBedrock: isBedrock,
+                            isClaudeAPI: isClaudeAPI,
+                            isThisMonth: isThisMonth,
+                            isToday: isToday,
+                            messageDate: messageDate,
+                            input: usageData["input_tokens"] as? Int ?? 0,
+                            output: usageData["output_tokens"] as? Int ?? 0,
+                            thinkingTokens: finalThinkingTokens,
+                            cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
+                            cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
+                        )
+                        globalMessageMap[messageId] = entry
+                    }
+                } // while newlineRange
+            } // while true (chunk reading)
+
+            // Process any remaining data after last newline
+            if !remainder.isEmpty,
+               let json = try? JSONSerialization.jsonObject(with: remainder) as? [String: Any],
+               json["type"] as? String == "assistant",
+               let message = json["message"] as? [String: Any],
+               let messageId = message["id"] as? String {
 
                 let model = message["model"] as? String ?? "unknown"
                 let isBedrock = messageId.hasPrefix("msg_bdrk_")
@@ -839,9 +953,6 @@ final class UsageTrackerViewModel: ObservableObject {
                     }
                 }
 
-                // Extract thinking tokens from content (not included in output_tokens)
-                // IMPORTANT: Thinking content only appears in early streaming entries,
-                // so we track the MAX thinking tokens seen for each message ID
                 var thinkingChars = 0
                 if let content = message["content"] as? [[String: Any]] {
                     for block in content {
@@ -851,19 +962,13 @@ final class UsageTrackerViewModel: ObservableObject {
                         }
                     }
                 }
-                // Estimate tokens: ~2.5 chars per token for English
                 let thinkingTokens = Int(Double(thinkingChars) / 2.5)
-                // Keep max thinking tokens seen (early entries have thinking, later entries don't)
                 let existingThinking = thinkingTokensMap[messageId] ?? 0
                 thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
 
                 if let usageData = message["usage"] as? [String: Any] {
-                    // Detect direct Claude API: no service_tier and not Bedrock
-                    // Subscription has service_tier: "standard"
                     let hasServiceTier = usageData["service_tier"] != nil
                     let isClaudeAPI = !isBedrock && !hasServiceTier
-
-                    // Use max thinking tokens from all entries for this message
                     let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
 
                     let entry = MessageEntry(
@@ -879,11 +984,10 @@ final class UsageTrackerViewModel: ObservableObject {
                         cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
                         cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
                     )
-                    // Keep last entry per message ID (has final token count, but use max thinking)
                     globalMessageMap[messageId] = entry
                 }
             }
-        }
+        } // for file in jsonlFiles
 
         // Accumulate from globally deduplicated messages
         let pricingService = PricingService.shared
@@ -1000,111 +1104,6 @@ final class UsageTrackerViewModel: ObservableObject {
         cachedCostBreakdown
     }
 
-    private var isUpdatingAPICosts = false
-
-    // Calculate and cache API costs from transcripts
-    // Scans ALL project directories for API usage
-    private func updateAPICosts() {
-        // Prevent duplicate parallel execution
-        guard !isUpdatingAPICosts else { return }
-        isUpdatingAPICosts = true
-
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            defer {
-                Task { @MainActor in
-                    self.isUpdatingAPICosts = false
-                    self.isLoadingAPICosts = false
-                }
-            }
-
-            var breakdown = APICostBreakdown()
-
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-            let projectsDir = "\(homeDir)/.claude/projects"
-
-            guard FileManager.default.fileExists(atPath: projectsDir) else {
-                await MainActor.run {
-                    self.cachedCostBreakdown = APICostBreakdown()
-                    MenuBarState.shared.apiCost = nil
-                    MenuBarState.shared.dailyApiCost = nil
-                    MenuBarState.shared.apiType = .none
-                }
-                return
-            }
-
-            do {
-                let directories = try FileManager.default.contentsOfDirectory(atPath: projectsDir)
-
-                for dir in directories {
-                    guard !dir.hasPrefix(".") else { continue }
-
-                    let fullDirPath = "\(projectsDir)/\(dir)"
-                    var isDirectory: ObjCBool = false
-                    guard FileManager.default.fileExists(atPath: fullDirPath, isDirectory: &isDirectory),
-                          isDirectory.boolValue else { continue }
-
-                    // Parse all transcripts directly from directory
-                    let usage = self.parseTranscriptsInDirectory(fullDirPath)
-                    guard usage.totalTokens > 0 else { continue }
-
-                    // Only count paid API projects for the API cost card
-                    guard usage.isPaidAPI else { continue }
-
-                    let projectTotal = usage.calculateCost()
-                    let projectMonthly = usage.calculateMonthlyCost()
-                    let projectDaily = usage.calculatedDailyCost
-
-                    // Add to appropriate bucket
-                    if usage.hasBedrock {
-                        breakdown.bedrockTotal += projectTotal
-                        breakdown.bedrockMonthly += projectMonthly
-                        breakdown.bedrockDaily += projectDaily
-                    } else if usage.hasClaudeAPI {
-                        breakdown.claudeAPITotal += projectTotal
-                        breakdown.claudeAPIMonthly += projectMonthly
-                        breakdown.claudeAPIDaily += projectDaily
-                    }
-                }
-            } catch {
-                // Ignore errors
-            }
-
-            let finalBreakdown = breakdown
-
-            await MainActor.run {
-                self.cachedCostBreakdown = finalBreakdown
-
-                // Update menu bar with total cost and type
-                let monthlyCost = finalBreakdown.totalMonthly
-                let dailyCost = finalBreakdown.totalDaily
-                if monthlyCost > 0 || dailyCost > 0 {
-                    MenuBarState.shared.apiCost = monthlyCost
-                    MenuBarState.shared.dailyApiCost = dailyCost
-                    // Set API type
-                    if finalBreakdown.hasMultiple {
-                        MenuBarState.shared.apiType = .mixed
-                    } else if finalBreakdown.hasBedrock {
-                        MenuBarState.shared.apiType = .bedrock
-                    } else if finalBreakdown.hasClaudeAPI {
-                        MenuBarState.shared.apiType = .claudeAPI
-                    } else {
-                        MenuBarState.shared.apiType = .unknown
-                    }
-                } else {
-                    MenuBarState.shared.apiCost = nil
-                    MenuBarState.shared.dailyApiCost = nil
-                    MenuBarState.shared.apiType = .none
-                }
-
-                // Save to disk cache
-                self.saveToCache()
-
-                // Save transcript cache
-                TranscriptCacheService.shared.saveCache()
-            }
-        }
-    }
 
     // MARK: - All Time Stats
 
