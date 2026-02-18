@@ -27,25 +27,13 @@ final class SettingsService: ObservableObject {
     @Published var showModelBreakdown: Bool {
         didSet { UserDefaults.standard.set(showModelBreakdown, forKey: "showModelBreakdown") }
     }
-    @Published var showRecentProjects: Bool {
-        didSet { UserDefaults.standard.set(showRecentProjects, forKey: "showRecentProjects") }
-    }
     @Published var showAllTimeStats: Bool {
         didSet { UserDefaults.standard.set(showAllTimeStats, forKey: "showAllTimeStats") }
-    }
-    @Published var showAPICost: Bool {
-        didSet { UserDefaults.standard.set(showAPICost, forKey: "showAPICost") }
     }
 
     // MARK: - Display Settings
     @Published var showMenuBarPercentage: Bool {
         didSet { UserDefaults.standard.set(showMenuBarPercentage, forKey: "showMenuBarPercentage") }
-    }
-    @Published var showMenuBarAPICost: Bool {
-        didSet { UserDefaults.standard.set(showMenuBarAPICost, forKey: "showMenuBarAPICost") }
-    }
-    @Published var menuBarAPICostType: String {  // "daily" or "monthly"
-        didSet { UserDefaults.standard.set(menuBarAPICostType, forKey: "menuBarAPICostType") }
     }
     @Published var compactMode: Bool {
         didSet { UserDefaults.standard.set(compactMode, forKey: "compactMode") }
@@ -60,18 +48,6 @@ final class SettingsService: ObservableObject {
     }
     @Published var rateLimitWarningThreshold: Int {
         didSet { UserDefaults.standard.set(rateLimitWarningThreshold, forKey: "rateLimitWarningThreshold") }
-    }
-    @Published var dailyCostAlertEnabled: Bool {
-        didSet { UserDefaults.standard.set(dailyCostAlertEnabled, forKey: "dailyCostAlertEnabled") }
-    }
-    @Published var dailyCostAlertThreshold: Double {
-        didSet { UserDefaults.standard.set(dailyCostAlertThreshold, forKey: "dailyCostAlertThreshold") }
-    }
-    @Published var monthlyCostAlertEnabled: Bool {
-        didSet { UserDefaults.standard.set(monthlyCostAlertEnabled, forKey: "monthlyCostAlertEnabled") }
-    }
-    @Published var monthlyCostAlertThreshold: Double {
-        didSet { UserDefaults.standard.set(monthlyCostAlertThreshold, forKey: "monthlyCostAlertThreshold") }
     }
 
     // MARK: - Data Settings
@@ -106,22 +82,14 @@ final class SettingsService: ObservableObject {
             "showRateLimits": true,
             "showTrendChart": true,
             "showModelBreakdown": true,
-            "showRecentProjects": true,
             "showAllTimeStats": true,
-            "showAPICost": true,
             // Display
             "showMenuBarPercentage": true,
-            "showMenuBarAPICost": true,
-            "menuBarAPICostType": "monthly",
             "compactMode": false,
             "showTokenCounts": true,
             // Notifications
             "notificationsEnabled": true,
             "rateLimitWarningThreshold": 80,
-            "dailyCostAlertEnabled": false,
-            "dailyCostAlertThreshold": 10.0,
-            "monthlyCostAlertEnabled": false,
-            "monthlyCostAlertThreshold": 100.0,
             // Data
             "cacheRetentionDays": 90,
             "enableAnalytics": true,
@@ -138,22 +106,14 @@ final class SettingsService: ObservableObject {
         self.showRateLimits = defaults.bool(forKey: "showRateLimits")
         self.showTrendChart = defaults.bool(forKey: "showTrendChart")
         self.showModelBreakdown = defaults.bool(forKey: "showModelBreakdown")
-        self.showRecentProjects = defaults.bool(forKey: "showRecentProjects")
         self.showAllTimeStats = defaults.bool(forKey: "showAllTimeStats")
-        self.showAPICost = defaults.bool(forKey: "showAPICost")
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
-        self.showMenuBarAPICost = defaults.bool(forKey: "showMenuBarAPICost")
-        self.menuBarAPICostType = defaults.string(forKey: "menuBarAPICostType") ?? "monthly"
         self.compactMode = defaults.bool(forKey: "compactMode")
         self.showTokenCounts = defaults.bool(forKey: "showTokenCounts")
 
         self.notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         self.rateLimitWarningThreshold = defaults.integer(forKey: "rateLimitWarningThreshold")
-        self.dailyCostAlertEnabled = defaults.bool(forKey: "dailyCostAlertEnabled")
-        self.dailyCostAlertThreshold = defaults.double(forKey: "dailyCostAlertThreshold")
-        self.monthlyCostAlertEnabled = defaults.bool(forKey: "monthlyCostAlertEnabled")
-        self.monthlyCostAlertThreshold = defaults.double(forKey: "monthlyCostAlertThreshold")
 
         self.cacheRetentionDays = defaults.integer(forKey: "cacheRetentionDays")
         self.enableAnalytics = defaults.bool(forKey: "enableAnalytics")
@@ -202,20 +162,12 @@ final class SettingsService: ObservableObject {
         showRateLimits = true
         showTrendChart = true
         showModelBreakdown = true
-        showRecentProjects = true
         showAllTimeStats = true
-        showAPICost = true
         showMenuBarPercentage = true
-        showMenuBarAPICost = true
-        menuBarAPICostType = "monthly"
         compactMode = false
         showTokenCounts = true
         notificationsEnabled = true
         rateLimitWarningThreshold = 80
-        dailyCostAlertEnabled = false
-        dailyCostAlertThreshold = 10.0
-        monthlyCostAlertEnabled = false
-        monthlyCostAlertThreshold = 100.0
         cacheRetentionDays = 90
         enableAnalytics = true
         checkForUpdatesAutomatically = true

@@ -37,12 +37,7 @@ struct MenuBarView: View {
             // Content
             ScrollView {
                 VStack(spacing: 12) {
-                    // API Cost Summary (shows when loading or when user has API/Bedrock projects)
-                    if settings.showAPICost && viewModel.showAPICostCard {
-                        APICostCard(breakdown: viewModel.apiCostBreakdown, isLoading: viewModel.isLoadingAPICosts)
-                    }
-
-                    // Rate Limits (at top for subscription users)
+                    // Rate Limits
                     if settings.showRateLimits, let rateLimit = viewModel.rateLimitStatus {
                         RateLimitCard(rateLimit: rateLimit)
                     }
@@ -52,7 +47,6 @@ struct MenuBarView: View {
                         LiveSessionsCard(
                             sessions: viewModel.liveClaudeSessions,
                             isLoading: viewModel.isLoadingSessions,
-                            isSubscription: viewModel.rateLimitStatus != nil,
                             currentSession: viewModel.sessionCache,
                             orphanedCount: viewModel.orphanedSessionCount,
                             orphanedMemoryMB: viewModel.orphanedMemoryMB,
@@ -120,24 +114,11 @@ struct MenuBarView: View {
                                             Spacer()
                                             Text(viewModel.formatTokenCount(model.tokens))
                                                 .font(.caption.monospacedDigit())
-                                            Text("(\(formatAPICost(model.apiCost)))")
-                                                .font(.caption2.monospacedDigit())
                                                 .foregroundColor(.secondary)
                                         }
                                     }
                                 }
                             }
-                        }
-
-                        // Recent Projects History
-                        if settings.showRecentProjects {
-                            HistorySessionsCard(
-                                sessions: viewModel.recentSessions,
-                                allSessions: viewModel.liveSessions,
-                                formatTokens: viewModel.formatTokenCount,
-                                formatCost: viewModel.formatCost,
-                                isExpanded: $viewModel.isHistoryExpanded
-                            )
                         }
 
                         // All Time Totals
@@ -300,19 +281,11 @@ struct MenuBarView: View {
         return formatter
     }
 
-    private func formatAPICost(_ cost: Double) -> String {
-        if cost < 0.01 { return "<$0.01" }
-        if cost < 1 { return String(format: "$%.2f", cost) }
-        return String(format: "$%.0f", cost)
-    }
-
     private func openSettings() {
         AnalyticsService.shared.trackSettingsOpened()
 
-        // Try multiple approaches for opening settings
         NSApp.activate(ignoringOtherApps: true)
 
-        // Approach 1: Keyboard shortcut simulation
         if let mainMenu = NSApp.mainMenu,
            let appMenuItem = mainMenu.item(at: 0),
            let appMenu = appMenuItem.submenu {
@@ -324,7 +297,6 @@ struct MenuBarView: View {
             }
         }
 
-        // Approach 2: Direct selector
         if #available(macOS 14.0, *) {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         } else {

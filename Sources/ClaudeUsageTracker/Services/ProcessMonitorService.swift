@@ -1,16 +1,6 @@
 import Foundation
 import Combine
 
-enum APIType: String {
-    case subscription = "Sub"
-    case claudeAPI = "API"
-    case bedrock = "Bedrock"
-
-    var hasCost: Bool {
-        self != .subscription
-    }
-}
-
 struct LiveClaudeSession: Identifiable, Equatable {
     let id: String
     let pid: Int32
@@ -19,17 +9,10 @@ struct LiveClaudeSession: Identifiable, Equatable {
     let cpuUsage: Double
     let memoryMB: Int
     var tokens: Int?
-    var cost: Double?
-    var apiType: APIType = .subscription
     var contextPercent: Double?
     var modelName: String?
     var isRealtime: Bool = false  // Has real-time data from session cache
     var isOrphaned: Bool = false  // Detached from terminal (??)
-
-    // Backwards compatibility
-    var isBedrock: Bool {
-        apiType.hasCost
-    }
 }
 
 @MainActor
@@ -126,9 +109,6 @@ final class ProcessMonitorService: ObservableObject {
             let projectPath = getWorkingDirectory(for: pid)
             let projectName = projectPath.isEmpty ? "Claude \(pid)" : URL(fileURLWithPath: projectPath).lastPathComponent
 
-            // Check API type from project config
-            let apiType = detectAPIType(projectPath: projectPath)
-
             let session = LiveClaudeSession(
                 id: "\(pid)",
                 pid: pid,
@@ -136,44 +116,12 @@ final class ProcessMonitorService: ObservableObject {
                 projectName: projectName,
                 cpuUsage: cpu,
                 memoryMB: memKB / 1024,
-                apiType: apiType,
                 isOrphaned: isOrphaned
             )
             sessions.append(session)
         }
 
         return sessions.sorted { $0.cpuUsage > $1.cpuUsage }
-    }
-
-    nonisolated private static func detectAPIType(projectPath: String) -> APIType {
-        guard !projectPath.isEmpty else { return .subscription }
-
-        // Check .claude/settings.json for API configuration
-        let settingsPath = "\(projectPath)/.claude/settings.json"
-        guard let data = FileManager.default.contents(atPath: settingsPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let env = json["env"] as? [String: Any] else {
-            return .subscription
-        }
-
-        // Check for Bedrock
-        if let useBedrock = env["CLAUDE_CODE_USE_BEDROCK"] as? String, useBedrock == "1" {
-            return .bedrock
-        }
-        if env["AWS_BEARER_TOKEN_BEDROCK"] != nil || env["AWS_ACCESS_KEY_ID"] != nil {
-            return .bedrock
-        }
-        if let model = env["ANTHROPIC_MODEL"] as? String,
-           model.lowercased().contains("anthropic.claude") {
-            return .bedrock
-        }
-
-        // Check for Claude API direct
-        if env["ANTHROPIC_API_KEY"] != nil {
-            return .claudeAPI
-        }
-
-        return .subscription
     }
 
     nonisolated private static func getWorkingDirectory(for pid: Int32) -> String {

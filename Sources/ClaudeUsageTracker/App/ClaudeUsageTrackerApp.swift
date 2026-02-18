@@ -29,14 +29,6 @@ struct ClaudeUsageTrackerApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // Second menu bar item for API cost (only shows if cost > 0)
-        MenuBarExtra {
-            AppContentView()
-        } label: {
-            CostMenuBarLabel()
-        }
-        .menuBarExtraStyle(.window)
-
         // Settings window
         Settings {
             SettingsView(settings: SettingsService.shared)
@@ -87,56 +79,11 @@ struct SessionMenuBarLabel: View {
     }
 }
 
-// API cost label (same icon as session)
-struct CostMenuBarLabel: View {
-    @ObservedObject private var state = MenuBarState.shared
-    @ObservedObject private var settings = SettingsService.shared
-
-    private var displayCost: Double? {
-        if settings.menuBarAPICostType == "daily" {
-            return state.dailyApiCost
-        } else {
-            return state.apiCost
-        }
-    }
-
-    var body: some View {
-        if settings.showMenuBarAPICost, let cost = displayCost, cost > 0 {
-            HStack(spacing: 4) {
-                ClaudeMenuIcon()
-                Text("$\(Int(cost))")
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-            }
-        }
-    }
-}
-
-enum MenuBarAPIType {
-    case none
-    case bedrock
-    case claudeAPI
-    case mixed  // Both Bedrock and Claude API
-    case unknown
-}
-
 @MainActor
 class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
     @Published var fiveHourResetAt: Date?
-    @Published var apiCost: Double?  // Monthly cost
-    @Published var dailyApiCost: Double?  // Today's cost
-    @Published var apiType: MenuBarAPIType = .none
-
-    var apiTypeLabel: String {
-        switch apiType {
-        case .none: return ""
-        case .bedrock: return "Bedrock"
-        case .claudeAPI: return "API"
-        case .mixed: return "API+Bedrock"
-        case .unknown: return "API"
-        }
-    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {

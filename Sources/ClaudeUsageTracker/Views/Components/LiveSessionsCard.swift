@@ -3,8 +3,7 @@ import SwiftUI
 struct LiveSessionsCard: View {
     let sessions: [LiveClaudeSession]
     var isLoading: Bool = false
-    var isSubscription: Bool = true  // true = show tokens, false = show cost (Bedrock/API)
-    var currentSession: SessionCache?  // Real-time session data
+    var currentSession: SessionCache?
     var orphanedCount: Int = 0
     var orphanedMemoryMB: Int = 0
     var onKillSession: ((LiveClaudeSession) -> Void)?
@@ -57,7 +56,7 @@ struct LiveSessionsCard: View {
             } else {
                 ForEach(sessions) { session in
                     if killingSession?.id == session.id {
-                        // Killing state - same structure as normal row
+                        // Killing state
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 4) {
@@ -76,7 +75,7 @@ struct LiveSessionsCard: View {
                         }
                         .padding(.vertical, 2)
                     } else if sessionToKill?.id == session.id {
-                        // Inline confirmation - same height as normal row
+                        // Inline confirmation
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Stop \(session.projectName)?")
@@ -88,7 +87,6 @@ struct LiveSessionsCard: View {
                                 killingSession = session
                                 sessionToKill = nil
                                 onKillSession?(session)
-                                // Clear killing state after delay
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                                     killingSession = nil
                                 }
@@ -126,22 +124,6 @@ struct LiveSessionsCard: View {
                                                 .font(.caption2)
                                                 .foregroundColor(.secondary)
                                         }
-                                    }
-                                    // Show API/Sub indicator only (no cost)
-                                    if session.isBedrock {
-                                        Text("API")
-                                            .font(.caption2)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .foregroundColor(.orange)
-                                            .cornerRadius(3)
-                                    } else if isSubscription {
-                                        Text("Sub")
-                                            .font(.caption2)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .foregroundColor(.blue)
-                                            .cornerRadius(3)
                                     }
                                 }
                                 Spacer()
@@ -189,7 +171,7 @@ struct LiveSessionsCard: View {
                     }
                 }
 
-                // Kill orphaned button - full width at bottom
+                // Kill orphaned button
                 if orphanedCount > 0 {
                     Divider()
                         .padding(.top, 4)
@@ -259,13 +241,6 @@ struct LiveSessionsCard: View {
         default: return String(format: "%.1fM tok", Double(count) / 1_000_000)
         }
     }
-
-    private func formatCost(_ cost: Double) -> String {
-        if cost < 0.01 {
-            return String(format: "$%.3f", cost)
-        }
-        return String(format: "$%.2f", cost)
-    }
 }
 
 // Context window progress bar for real-time session data
@@ -305,7 +280,7 @@ struct ContextProgressBar: View {
     }
 }
 
-// Collapsible card for history
+// Collapsible card component
 struct CollapsibleCard<Content: View>: View {
     let title: String
     let icon: String
@@ -346,76 +321,5 @@ struct CollapsibleCard<Content: View>: View {
         }
         .background(Color(.windowBackgroundColor))
         .cornerRadius(10)
-    }
-}
-
-struct HistorySessionsCard: View {
-    let sessions: [LiveSession]
-    let allSessions: [LiveSession]  // All sessions for popup
-    let formatTokens: (Int) -> String
-    let formatCost: (Double) -> String
-    @Binding var isExpanded: Bool
-
-    var body: some View {
-        CollapsibleCard(
-            title: "Recent Projects",
-            icon: "clock.arrow.circlepath",
-            count: sessions.count,
-            isExpanded: $isExpanded
-        ) {
-            if sessions.isEmpty {
-                Text("No recent sessions")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(sessions) { session in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 4) {
-                                    Text(session.projectName)
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                    // Show type badge for all projects
-                                    Text(session.apiType.rawValue)
-                                        .font(.system(size: 7, weight: .medium))
-                                        .padding(.horizontal, 3)
-                                        .foregroundColor(session.isAPI ? .orange : .blue)
-                                        .cornerRadius(2)
-                                }
-                                Text(formatTokens(session.lastTokens) + " tokens")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            // Only show cost for API projects
-                            if session.isAPI && session.lastCost > 0 {
-                                Text(formatCost(session.lastCost))
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundColor(.orange)
-                            }
-                        }
-                    }
-
-                    // Show All button
-                    if allSessions.count > sessions.count {
-                        PopoverAnchorButton(
-                            title: "Show All",
-                            count: allSessions.count
-                        ) { anchorView in
-                            PopoverManager.shared.showAllProjectsPopover(
-                                anchorView: anchorView,
-                                sessions: allSessions.sorted { $0.lastCost > $1.lastCost },
-                                formatTokens: formatTokens,
-                                formatCost: formatCost
-                            )
-                        }
-                        .frame(height: 20)
-                        .padding(.top, 4)
-                    }
-                }
-            }
-        }
     }
 }

@@ -32,20 +32,6 @@ enum TimeFrame: String, CaseIterable, Identifiable {
     }
 }
 
-struct LiveSession: Identifiable {
-    let id: String
-    let projectName: String
-    let projectPath: String
-    let lastCost: Double
-    let lastTokens: Int
-    let isActive: Bool
-    var apiType: APIType = .subscription  // Only show cost for API types
-
-    var isAPI: Bool {
-        apiType != .subscription
-    }
-}
-
 @MainActor
 final class UsageTrackerViewModel: ObservableObject {
     @Published var statsCache: StatsCache?
@@ -61,68 +47,33 @@ final class UsageTrackerViewModel: ObservableObject {
     @Published var sessionCache: SessionCache?
 
     // UI State
-    @Published var showDetails = false {
-        didSet {
-            if showDetails && !hasLoadedFullHistory {
-                hasLoadedFullHistory = true
-                updateTranscriptData(currentMonthOnly: false)
-            }
-        }
-    }
-    @Published var isHistoryExpanded = true
+    @Published var showDetails = false
     @Published var isModelsExpanded = true
     @Published var isTrendExpanded = true
-
-    private var hasLoadedFullHistory = false
 
     private let fileWatcher: FileWatcherService
     private let processMonitor: ProcessMonitorService
     private var cancellables = Set<AnyCancellable>()
 
-    // Cache file path
-    private let cacheFilePath: String = {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(homeDir)/.claude/usage-tracker-cache.json"
-    }()
-
     init(fileWatcher: FileWatcherService, processMonitor: ProcessMonitorService) {
         self.fileWatcher = fileWatcher
         self.processMonitor = processMonitor
 
-        // Setup bindings first so observers are ready
         setupBindings()
-
-        // Load cached data (this will trigger the observer to update MenuBarState)
-        loadFromCache()
-
-        // Then update in background
-        updateTranscriptData()
 
         // Fetch rate limit usage from API
         fetchUsageFromAPI()
 
         // Set up periodic refresh of usage data (every 60 seconds)
         setupUsageRefreshTimer()
-
-        // Set up periodic refresh of API costs (every 30 seconds)
-        setupAPICostRefreshTimer()
     }
 
     private var usageRefreshTimer: Timer?
-    private var apiCostRefreshTimer: Timer?
 
     private func setupUsageRefreshTimer() {
         usageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.fetchUsageFromAPI()
-            }
-        }
-    }
-
-    private func setupAPICostRefreshTimer() {
-        apiCostRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.updateTranscriptData()
             }
         }
     }
@@ -142,7 +93,6 @@ final class UsageTrackerViewModel: ObservableObject {
         let fiveHourPercent = Int(min(max(usage.fiveHour.utilization, 0), 100))
         let sevenDayPercent = Int(min(max(usage.sevenDay.utilization, 0), 100))
 
-        // Create RateLimitCache to reuse existing logic
         let data = RateLimitData(
             planName: "Max",
             fiveHour: fiveHourPercent,
@@ -158,104 +108,7 @@ final class UsageTrackerViewModel: ObservableObject {
         updateRateLimitStatus(from: cache)
     }
 
-    // MARK: - Disk Cache
-
-    private struct DiskCache: Codable {
-        let sessions: [CachedSession]
-        let bedrockTotal: Double
-        let bedrockMonthly: Double
-        let timestamp: Date
-
-        struct CachedSession: Codable {
-            let id: String
-            let projectName: String
-            let projectPath: String
-            let lastCost: Double
-            let lastTokens: Int
-            let apiType: String
-        }
-    }
-
-    private func loadFromCache() {
-        guard let data = FileManager.default.contents(atPath: cacheFilePath),
-              let cache = try? JSONDecoder().decode(DiskCache.self, from: data) else {
-            return
-        }
-
-        // Load cached sessions
-        cachedLiveSessions = cache.sessions.map { s in
-            LiveSession(
-                id: s.id,
-                projectName: s.projectName,
-                projectPath: s.projectPath,
-                lastCost: s.lastCost,
-                lastTokens: s.lastTokens,
-                isActive: true,
-                apiType: APIType(rawValue: s.apiType) ?? .subscription
-            )
-        }
-
-        // Load cached cost breakdown (Combine observer will update MenuBarState)
-        var breakdown = APICostBreakdown()
-        breakdown.bedrockTotal = cache.bedrockTotal
-        breakdown.bedrockMonthly = cache.bedrockMonthly
-        cachedCostBreakdown = breakdown
-
-        // Mark as loaded (not loading anymore)
-        if cachedCostBreakdown.hasBedrock {
-            isLoadingAPICosts = false
-        }
-    }
-
-    private func saveToCache() {
-        let cache = DiskCache(
-            sessions: cachedLiveSessions.map { s in
-                DiskCache.CachedSession(
-                    id: s.id,
-                    projectName: s.projectName,
-                    projectPath: s.projectPath,
-                    lastCost: s.lastCost,
-                    lastTokens: s.lastTokens,
-                    apiType: s.apiType.rawValue
-                )
-            },
-            bedrockTotal: cachedCostBreakdown.bedrockTotal,
-            bedrockMonthly: cachedCostBreakdown.bedrockMonthly,
-            timestamp: Date()
-        )
-
-        if let data = try? JSONEncoder().encode(cache) {
-            try? data.write(to: URL(fileURLWithPath: cacheFilePath))
-        }
-    }
-
     private func setupBindings() {
-        // Sync cachedCostBreakdown to MenuBarState whenever it changes
-        $cachedCostBreakdown
-            .receive(on: DispatchQueue.main)
-            .sink { breakdown in
-                let monthlyCost = breakdown.totalMonthly
-                let dailyCost = breakdown.totalDaily
-                if monthlyCost > 0 || dailyCost > 0 {
-                    MenuBarState.shared.apiCost = monthlyCost
-                    MenuBarState.shared.dailyApiCost = dailyCost
-                    if breakdown.hasMultiple {
-                        MenuBarState.shared.apiType = .mixed
-                    } else if breakdown.hasBedrock {
-                        MenuBarState.shared.apiType = .bedrock
-                    } else if breakdown.hasClaudeAPI {
-                        MenuBarState.shared.apiType = .claudeAPI
-                    } else {
-                        MenuBarState.shared.apiType = .unknown
-                    }
-                } else {
-                    MenuBarState.shared.apiCost = nil
-                    MenuBarState.shared.dailyApiCost = nil
-                    MenuBarState.shared.apiType = .none
-                }
-            }
-            .store(in: &cancellables)
-
         fileWatcher.$statsCache
             .receive(on: DispatchQueue.main)
             .sink { [weak self] stats in
@@ -268,10 +121,7 @@ final class UsageTrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] config in
                 self?.claudeConfig = config
-                // Re-enrich sessions when config updates
                 self?.refreshEnrichedSessions()
-                // Update transcript data (costs + live sessions) in background
-                self?.updateTranscriptData()
             }
             .store(in: &cancellables)
 
@@ -301,7 +151,6 @@ final class UsageTrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] cache in
                 self?.sessionCache = cache
-                // Re-enrich sessions when real-time session data updates
                 self?.refreshEnrichedSessions()
             }
             .store(in: &cancellables)
@@ -317,7 +166,7 @@ final class UsageTrackerViewModel: ObservableObject {
         let projects = claudeConfig?.projects
         var enrichedSessions = sessions
 
-        // First: apply real-time data from session cache if we can match
+        // Apply real-time data from session cache if we can match
         if let cache = sessionCache, let cwd = cache.cwd {
             let cachePath = cwd.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             let cacheProjectName = URL(fileURLWithPath: cwd).lastPathComponent
@@ -336,26 +185,12 @@ final class UsageTrackerViewModel: ObservableObject {
                     if let model = cache.model {
                         enrichedSessions[i].modelName = model.displayName ?? model.id
                     }
-                    // Calculate session cost from real-time token data
-                    if let currentUsage = contextWindow.currentUsage {
-                        let modelId = cache.model?.id ?? ""
-                        let sessionCost = PricingService.shared.calculateCost(
-                            inputTokens: currentUsage.inputTokens ?? 0,
-                            outputTokens: currentUsage.outputTokens ?? 0,
-                            cacheCreationTokens: currentUsage.cacheCreationInputTokens ?? 0,
-                            cacheReadTokens: currentUsage.cacheReadInputTokens ?? 0,
-                            model: modelId
-                        )
-                        if sessionCost > 0 {
-                            enrichedSessions[i].cost = sessionCost
-                        }
-                    }
                     break
                 }
             }
         }
 
-        // Second: enrich ALL sessions with config data and calculate cost
+        // Enrich with config data (tokens from last session)
         for i in 0..<enrichedSessions.count {
             let sessionPath = enrichedSessions[i].projectPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
@@ -363,21 +198,10 @@ final class UsageTrackerViewModel: ObservableObject {
                 for (configPath, projectConfig) in projects {
                     let normalizedConfigPath = configPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                     if normalizedConfigPath == sessionPath {
-                        // Get tokens from config if not already set
                         let inputTokens = projectConfig.lastTotalInputTokens ?? 0
                         let outputTokens = projectConfig.lastTotalOutputTokens ?? 0
                         if enrichedSessions[i].tokens == nil {
                             enrichedSessions[i].tokens = inputTokens + outputTokens
-                        }
-
-                        // Check model usage and determine API type
-                        if let modelUsage = projectConfig.lastModelUsage {
-                            let (isBedrockModel, _, _) = calculateSessionCost(modelUsage: modelUsage, inputTokens: inputTokens, outputTokens: outputTokens)
-                            if isBedrockModel {
-                                enrichedSessions[i].apiType = .bedrock
-                            }
-                            // Note: Don't set cost from config here - we want session-specific cost
-                            // which comes from real-time data in the first pass
                         }
                         break
                     }
@@ -385,94 +209,7 @@ final class UsageTrackerViewModel: ObservableObject {
             }
         }
 
-        // Third: use API type from cached live sessions, but DON'T override session-specific cost
-        // Session cost should come from real-time data (first pass), not project totals
-        for i in 0..<enrichedSessions.count {
-            let sessionName = enrichedSessions[i].projectName
-            let sessionPath = enrichedSessions[i].projectPath
-
-            // Try to match with cached session by name or path
-            if let cachedSession = cachedLiveSessions.first(where: { cached in
-                cached.projectName == sessionName ||
-                cached.projectPath.contains(sessionName) ||
-                sessionPath.contains(cached.projectName)
-            }) {
-                // Only use API type, not cost (cost should be session-specific from real-time data)
-                if cachedSession.isAPI {
-                    enrichedSessions[i].apiType = cachedSession.apiType
-                }
-            }
-        }
-
         return enrichedSessions
-    }
-
-    // Calculate cost for any session - Bedrock uses costUSD, subscription uses token pricing
-    private func calculateSessionCost(modelUsage: [String: ProjectModelUsage], inputTokens: Int, outputTokens: Int) -> (isBedrock: Bool, bedrockCost: Double, subCost: Double) {
-        var bedrockCost: Double = 0
-        var hasBedrock = false
-        var primaryModel: String = ""
-
-        for (model, usage) in modelUsage {
-            let modelLower = model.lowercased()
-            let isBedrock = modelLower.contains("anthropic.claude") && !modelLower.hasPrefix("claude-")
-
-            if isBedrock {
-                hasBedrock = true
-                bedrockCost += usage.costUSD ?? 0
-            }
-            // Track the main model for subscription pricing
-            if primaryModel.isEmpty || (usage.inputTokens ?? 0) > 0 {
-                primaryModel = model
-            }
-        }
-
-        // Calculate subscription cost based on model and tokens
-        let subCost = calculateSubscriptionCost(model: primaryModel, inputTokens: inputTokens, outputTokens: outputTokens)
-
-        return (hasBedrock, bedrockCost, subCost)
-    }
-
-    // Calculate subscription cost using Anthropic pricing
-    private func calculateSubscriptionCost(model: String, inputTokens: Int, outputTokens: Int) -> Double {
-        let totalTokens = Double(inputTokens + outputTokens)
-        let modelLower = model.lowercased()
-
-        // Blended rate per million tokens (accounts for typical cache usage)
-        let rate: Double
-        if modelLower.contains("opus-4-5") || modelLower.contains("opus-4.5") {
-            rate = 24.0  // Opus 4.5
-        } else if modelLower.contains("opus") {
-            rate = 50.0  // Opus 3
-        } else if modelLower.contains("sonnet") {
-            rate = 10.0  // Sonnet
-        } else if modelLower.contains("haiku") {
-            rate = 1.0   // Haiku
-        } else {
-            rate = 10.0  // Default
-        }
-
-        return totalTokens * rate / 1_000_000
-    }
-
-    // Calculate Bedrock cost from costUSD in config
-    private func calculateBedrockCost(modelUsage: [String: ProjectModelUsage]) -> (isBedrock: Bool, cost: Double) {
-        var totalCost: Double = 0
-        var hasBedrock = false
-
-        for (model, usage) in modelUsage {
-            let modelLower = model.lowercased()
-            // Bedrock models have format like "anthropic.claude-..." or "eu.anthropic.claude-..."
-            let isBedrock = modelLower.contains("anthropic.claude") && !modelLower.hasPrefix("claude-")
-
-            if isBedrock {
-                hasBedrock = true
-                // Use costUSD directly from config (already calculated by Claude)
-                totalCost += usage.costUSD ?? 0
-            }
-        }
-
-        return (hasBedrock, totalCost)
     }
 
     // Track previous values for burn rate calculation
@@ -508,23 +245,18 @@ final class UsageTrackerViewModel: ObservableObject {
 
             let timeDelta = Date().timeIntervalSince(lastUpdate)
 
-            // Only calculate if at least 10 seconds have passed
             if timeDelta >= 10 {
                 let hoursDelta = timeDelta / 3600.0
 
-                // Session rate: detect if we're in a new window (reset happened)
                 let sessionDelta = cache.data.fiveHour - lastSession
                 if sessionDelta > 0 {
                     let instantRate = Double(sessionDelta) / hoursDelta
-                    // Exponential smoothing: 70% new, 30% old (reacts fast to spikes)
                     smoothedSessionRate = 0.7 * instantRate + 0.3 * smoothedSessionRate
                     recentSessionRate = smoothedSessionRate
                 } else if sessionDelta < 0 {
-                    // Reset happened, clear the rate
                     smoothedSessionRate = 0
                 }
 
-                // Weekly rate
                 let weeklyDelta = cache.data.sevenDay - lastWeekly
                 if weeklyDelta > 0 {
                     let instantRate = Double(weeklyDelta) / hoursDelta
@@ -536,7 +268,6 @@ final class UsageTrackerViewModel: ObservableObject {
             }
         }
 
-        // Update tracking values
         lastSessionPercent = cache.data.fiveHour
         lastWeeklyPercent = cache.data.sevenDay
         lastRateLimitUpdate = Date()
@@ -549,13 +280,11 @@ final class UsageTrackerViewModel: ObservableObject {
             sevenDayResetAt: sevenDayReset
         )
 
-        // Pass the recent burn rates
         status.recentSessionBurnRate = recentSessionRate ?? smoothedSessionRate
         status.recentWeeklyBurnRate = recentWeeklyRate ?? smoothedWeeklyRate
 
         rateLimitStatus = status
 
-        // Update menu bar percentage and reset date
         MenuBarState.shared.sessionPercent = cache.data.fiveHour
         MenuBarState.shared.fiveHourResetAt = fiveHourReset
     }
@@ -564,7 +293,7 @@ final class UsageTrackerViewModel: ObservableObject {
         isLoading = true
         fileWatcher.refresh()
         fetchUsageFromAPI()
-        UsageAPIService.shared.clearCache()  // Force fresh fetch
+        UsageAPIService.shared.clearCache()
         isLoading = false
     }
 
@@ -631,471 +360,18 @@ final class UsageTrackerViewModel: ObservableObject {
         }
     }
 
-    var periodTokensByModel: [(name: String, displayName: String, tokens: Int, color: Color, apiCost: Double)] {
-        // Use statsCache.modelUsage - already has accurate token breakdown, loads instantly
+    var periodTokensByModel: [(name: String, displayName: String, tokens: Int, color: Color)] {
         guard let usage = statsCache?.modelUsage else { return [] }
 
         return usage.compactMap { (model, stats) in
-            // Filter out synthetic/unknown models and models with 0 tokens
             let totalTokens = stats.inputTokens + stats.outputTokens + stats.cacheReadInputTokens + stats.cacheCreationInputTokens
             guard totalTokens > 0,
                   !model.lowercased().contains("synthetic"),
                   model.lowercased().contains("claude") else { return nil }
 
-            let apiCost = calculateAPIPrice(model: model, stats: stats)
-            return (model, formatModelName(model), totalTokens, colorForModel(model), apiCost)
+            return (model, formatModelName(model), totalTokens, colorForModel(model))
         }.sorted { $0.tokens > $1.tokens }
     }
-
-    /// Calculate API cost using actual token breakdown
-    private func calculateAPIPrice(model: String, stats: ModelUsageStats) -> Double {
-        let pricing = PricingService.shared.getPricing(for: model)
-        var cost: Double = 0
-        cost += Double(stats.inputTokens) * pricing.inputPerMTok / 1_000_000
-        cost += Double(stats.outputTokens) * pricing.outputPerMTok / 1_000_000
-        cost += Double(stats.cacheCreationInputTokens) * pricing.cacheWritePerMTok / 1_000_000
-        cost += Double(stats.cacheReadInputTokens) * pricing.cacheReadPerMTok / 1_000_000
-        return cost
-    }
-
-    // MARK: - Live Sessions
-
-    var liveSessions: [LiveSession] {
-        cachedLiveSessions
-    }
-
-    @Published private var cachedLiveSessions: [LiveSession] = []
-
-    private var isUpdatingTranscriptData = false
-
-    // Single pass: update both live sessions and API costs from transcripts
-    // Scans ALL project directories once, producing both results
-    private func updateTranscriptData(currentMonthOnly: Bool = true) {
-        guard !isUpdatingTranscriptData else { return }
-        isUpdatingTranscriptData = true
-
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            defer {
-                Task { @MainActor in
-                    self.isUpdatingTranscriptData = false
-                    self.isLoadingAPICosts = false
-                }
-            }
-
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-            let projectsDir = "\(homeDir)/.claude/projects"
-
-            guard FileManager.default.fileExists(atPath: projectsDir) else {
-                await MainActor.run {
-                    self.cachedLiveSessions = []
-                    self.cachedCostBreakdown = APICostBreakdown()
-                    MenuBarState.shared.apiCost = nil
-                    MenuBarState.shared.dailyApiCost = nil
-                    MenuBarState.shared.apiType = .none
-                }
-                return
-            }
-
-            var sessions: [LiveSession] = []
-            var breakdown = APICostBreakdown()
-
-            do {
-                let directories = try FileManager.default.contentsOfDirectory(atPath: projectsDir)
-
-                for dir in directories {
-                    guard !dir.hasPrefix(".") else { continue }
-
-                    let fullDirPath = "\(projectsDir)/\(dir)"
-                    var isDirectory: ObjCBool = false
-                    guard FileManager.default.fileExists(atPath: fullDirPath, isDirectory: &isDirectory),
-                          isDirectory.boolValue else { continue }
-
-                    // Parse transcripts once
-                    let usage = self.parseTranscriptsInDirectory(fullDirPath, currentMonthOnly: currentMonthOnly)
-                    guard usage.totalTokens > 0 else { continue }
-
-                    // --- Live sessions ---
-                    let projectName: String
-                    if let range = dir.range(of: "WebstormProjects-") {
-                        projectName = String(dir[range.upperBound...])
-                    } else if let range = dir.range(of: "branco-") {
-                        projectName = String(dir[range.upperBound...])
-                    } else {
-                        let components = dir.components(separatedBy: "-")
-                        projectName = components.suffix(3).joined(separator: "-")
-                    }
-
-                    let detectedAPIType: APIType
-                    if usage.hasBedrock {
-                        detectedAPIType = .bedrock
-                    } else if usage.hasClaudeAPI {
-                        detectedAPIType = .claudeAPI
-                    } else {
-                        detectedAPIType = .subscription
-                    }
-
-                    let totalCost = usage.isPaidAPI ? usage.calculateCost() : 0
-
-                    sessions.append(LiveSession(
-                        id: dir,
-                        projectName: projectName,
-                        projectPath: dir,
-                        lastCost: totalCost,
-                        lastTokens: usage.totalTokens,
-                        isActive: true,
-                        apiType: detectedAPIType
-                    ))
-
-                    // --- API cost breakdown ---
-                    if usage.isPaidAPI {
-                        let projectTotal = usage.calculateCost()
-                        let projectMonthly = usage.calculateMonthlyCost()
-                        let projectDaily = usage.calculatedDailyCost
-
-                        if usage.hasBedrock {
-                            breakdown.bedrockTotal += projectTotal
-                            breakdown.bedrockMonthly += projectMonthly
-                            breakdown.bedrockDaily += projectDaily
-                        } else if usage.hasClaudeAPI {
-                            breakdown.claudeAPITotal += projectTotal
-                            breakdown.claudeAPIMonthly += projectMonthly
-                            breakdown.claudeAPIDaily += projectDaily
-                        }
-                    }
-                }
-            } catch {
-                // Ignore errors
-            }
-
-            let sorted = sessions.sorted {
-                if $0.isAPI && !$1.isAPI { return true }
-                if !$0.isAPI && $1.isAPI { return false }
-                if $0.isAPI { return $0.lastCost > $1.lastCost }
-                return $0.lastTokens > $1.lastTokens
-            }
-
-            let finalBreakdown = breakdown
-
-            await MainActor.run {
-                // Update live sessions
-                self.cachedLiveSessions = sorted
-
-                // Update API cost breakdown
-                self.cachedCostBreakdown = finalBreakdown
-
-                let monthlyCost = finalBreakdown.totalMonthly
-                let dailyCost = finalBreakdown.totalDaily
-                if monthlyCost > 0 || dailyCost > 0 {
-                    MenuBarState.shared.apiCost = monthlyCost
-                    MenuBarState.shared.dailyApiCost = dailyCost
-                    if finalBreakdown.hasMultiple {
-                        MenuBarState.shared.apiType = .mixed
-                    } else if finalBreakdown.hasBedrock {
-                        MenuBarState.shared.apiType = .bedrock
-                    } else if finalBreakdown.hasClaudeAPI {
-                        MenuBarState.shared.apiType = .claudeAPI
-                    } else {
-                        MenuBarState.shared.apiType = .unknown
-                    }
-                } else {
-                    MenuBarState.shared.apiCost = nil
-                    MenuBarState.shared.dailyApiCost = nil
-                    MenuBarState.shared.apiType = .none
-                }
-
-                self.saveToCache()
-                TranscriptCacheService.shared.saveCache()
-            }
-        }
-    }
-
-    // Fast byte-level substring search (avoids String conversion)
-    nonisolated private func containsSequence(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
-        guard needle.count <= haystack.count else { return false }
-        let limit = haystack.count - needle.count
-        for i in 0...limit {
-            var match = true
-            for j in 0..<needle.count {
-                if haystack[i + j] != needle[j] {
-                    match = false
-                    break
-                }
-            }
-            if match { return true }
-        }
-        return false
-    }
-
-    // Parse transcripts in a directory with GLOBAL deduplication by message ID
-    // Uses caching to avoid re-parsing unchanged directories
-    // When currentMonthOnly is true, skips messages older than the current month for faster loading
-    nonisolated private func parseTranscriptsInDirectory(_ directory: String, currentMonthOnly: Bool = true) -> TranscriptUsage {
-        let cacheService = TranscriptCacheService.shared
-
-        // Only use cache for full loads (not month-only partial loads)
-        if !currentMonthOnly, let cached = cacheService.getCached(directory: directory) {
-            return cacheService.toTranscriptUsage(cached)
-        }
-
-        // Parse fresh
-        var combinedUsage = TranscriptUsage()
-
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: directory) else {
-            return combinedUsage
-        }
-
-        let jsonlFiles = files.filter { $0.hasSuffix(".jsonl") }
-
-        // Global message deduplication across ALL files
-        struct MessageEntry {
-            let model: String
-            let isBedrock: Bool
-            let isClaudeAPI: Bool  // Direct Claude API (no service_tier, not Bedrock)
-            let isThisMonth: Bool
-            let isToday: Bool
-            let messageDate: Date?  // For time-based pricing
-            let input: Int
-            let output: Int
-            let thinkingTokens: Int  // Estimated from thinking content (not in output_tokens)
-            let cacheCreate: Int
-            let cacheRead: Int
-        }
-        var globalMessageMap: [String: MessageEntry] = [:]
-        var thinkingTokensMap: [String: Int] = [:]  // Track max thinking tokens per message ID
-
-        var calendar = Calendar.current
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let now = Date()
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
-        let todayStart = calendar.startOfDay(for: now)
-
-        // Pre-compute byte sequences for fast filtering before JSON parse
-        let assistantMarker = Array("\"assistant\"".utf8)
-        let usageMarker = Array("\"usage\"".utf8)
-
-        for file in jsonlFiles {
-            let fullPath = "\(directory)/\(file)"
-            guard let fileHandle = FileHandle(forReadingAtPath: fullPath) else { continue }
-            defer { fileHandle.closeFile() }
-
-            let bufferSize = 512 * 1024 // 512 KB chunks
-            var buffer = Data()
-            var searchStart = 0
-
-            while true {
-                let chunk = fileHandle.readData(ofLength: bufferSize)
-                if chunk.isEmpty { break }
-                buffer.append(chunk)
-
-                // Process complete lines from buffer
-                while searchStart < buffer.count {
-                    guard let newlineIndex = buffer[searchStart...].firstIndex(of: 0x0A) else {
-                        break // No more complete lines in buffer
-                    }
-
-                    let lineRange = searchStart..<newlineIndex
-                    let nextStart = newlineIndex + 1
-
-                    // Fast filter: skip lines that don't contain "assistant" or "usage"
-                    let lineBytes = Array(buffer[lineRange])
-                    let hasAssistant = lineBytes.count > 20 && containsSequence(lineBytes, assistantMarker)
-
-                    if hasAssistant && containsSequence(lineBytes, usageMarker) {
-                        // Only parse JSON for lines that likely have assistant messages with usage
-                        autoreleasepool {
-                            let lineData = buffer.subdata(in: lineRange)
-                            guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                                  json["type"] as? String == "assistant",
-                                  let message = json["message"] as? [String: Any],
-                                  let messageId = message["id"] as? String,
-                                  let usageData = message["usage"] as? [String: Any] else { return }
-
-                            let model = message["model"] as? String ?? "unknown"
-                            let isBedrock = messageId.hasPrefix("msg_bdrk_")
-
-                            var isThisMonth = false
-                            var isToday = false
-                            var messageDate: Date?
-                            if let timestamp = json["timestamp"] as? String {
-                                let formatter = ISO8601DateFormatter()
-                                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                                var date = formatter.date(from: timestamp)
-                                if date == nil {
-                                    formatter.formatOptions = [.withInternetDateTime]
-                                    date = formatter.date(from: timestamp)
-                                }
-                                if let date = date {
-                                    // Skip old messages when in quick/current-month-only mode
-                                    if currentMonthOnly && date < monthStart { return }
-                                    isThisMonth = date >= monthStart
-                                    isToday = date >= todayStart
-                                    messageDate = date
-                                }
-                            }
-
-                            var thinkingChars = 0
-                            if let content = message["content"] as? [[String: Any]] {
-                                for block in content {
-                                    if block["type"] as? String == "thinking",
-                                       let thinking = block["thinking"] as? String {
-                                        thinkingChars += thinking.count
-                                    }
-                                }
-                            }
-                            let thinkingTokens = Int(Double(thinkingChars) / 2.5)
-                            let existingThinking = thinkingTokensMap[messageId] ?? 0
-                            thinkingTokensMap[messageId] = max(existingThinking, thinkingTokens)
-
-                            let hasServiceTier = usageData["service_tier"] != nil
-                            let isClaudeAPI = !isBedrock && !hasServiceTier
-                            let finalThinkingTokens = thinkingTokensMap[messageId] ?? thinkingTokens
-
-                            let entry = MessageEntry(
-                                model: model,
-                                isBedrock: isBedrock,
-                                isClaudeAPI: isClaudeAPI,
-                                isThisMonth: isThisMonth,
-                                isToday: isToday,
-                                messageDate: messageDate,
-                                input: usageData["input_tokens"] as? Int ?? 0,
-                                output: usageData["output_tokens"] as? Int ?? 0,
-                                thinkingTokens: finalThinkingTokens,
-                                cacheCreate: usageData["cache_creation_input_tokens"] as? Int ?? 0,
-                                cacheRead: usageData["cache_read_input_tokens"] as? Int ?? 0
-                            )
-                            globalMessageMap[messageId] = entry
-                        } // autoreleasepool
-                    }
-
-                    searchStart = nextStart
-                }
-
-                // Compact: remove processed bytes from buffer
-                if searchStart > 0 {
-                    buffer.removeSubrange(0..<searchStart)
-                    searchStart = 0
-                }
-            } // while reading chunks
-        } // for file in jsonlFiles
-
-        // Accumulate from globally deduplicated messages
-        let pricingService = PricingService.shared
-
-        for (_, entry) in globalMessageMap {
-            combinedUsage.model = entry.model
-            if entry.isBedrock {
-                combinedUsage.isBedrock = true
-            }
-            if entry.isClaudeAPI {
-                combinedUsage.isClaudeAPI = true
-            }
-
-            // Include thinking tokens in output for display and cost
-            combinedUsage.inputTokens += entry.input
-            combinedUsage.outputTokens += entry.output + entry.thinkingTokens
-            combinedUsage.cacheCreationTokens += entry.cacheCreate
-            combinedUsage.cacheReadTokens += entry.cacheRead
-
-            // Calculate cost using pricing for this message's date
-            // Thinking tokens are billed at same rate as output tokens
-            let messageCost = pricingService.calculateCost(
-                inputTokens: entry.input,
-                outputTokens: entry.output + entry.thinkingTokens,
-                cacheCreationTokens: entry.cacheCreate,
-                cacheReadTokens: entry.cacheRead,
-                model: entry.model,
-                at: entry.messageDate
-            )
-            combinedUsage.calculatedCost += messageCost
-
-            var modelData = combinedUsage.modelUsage[entry.model] ?? ModelUsageData()
-            modelData.inputTokens += entry.input
-            modelData.outputTokens += entry.output + entry.thinkingTokens
-            modelData.cacheCreationTokens += entry.cacheCreate
-            modelData.cacheReadTokens += entry.cacheRead
-            combinedUsage.modelUsage[entry.model] = modelData
-
-            if entry.isThisMonth {
-                combinedUsage.monthlyInputTokens += entry.input
-                combinedUsage.monthlyOutputTokens += entry.output + entry.thinkingTokens
-                combinedUsage.monthlyCacheCreationTokens += entry.cacheCreate
-                combinedUsage.monthlyCacheReadTokens += entry.cacheRead
-                // Only count paid API messages for monthly cost
-                if entry.isBedrock || entry.isClaudeAPI {
-                    combinedUsage.calculatedMonthlyCost += messageCost
-                }
-
-                var monthlyModelData = combinedUsage.monthlyModelUsage[entry.model] ?? ModelUsageData()
-                monthlyModelData.inputTokens += entry.input
-                monthlyModelData.outputTokens += entry.output + entry.thinkingTokens
-                monthlyModelData.cacheCreationTokens += entry.cacheCreate
-                monthlyModelData.cacheReadTokens += entry.cacheRead
-                combinedUsage.monthlyModelUsage[entry.model] = monthlyModelData
-            }
-
-            if entry.isToday {
-                combinedUsage.dailyInputTokens += entry.input
-                combinedUsage.dailyOutputTokens += entry.output + entry.thinkingTokens
-                combinedUsage.dailyCacheCreationTokens += entry.cacheCreate
-                combinedUsage.dailyCacheReadTokens += entry.cacheRead
-                // Only count paid API messages for daily cost
-                if entry.isBedrock || entry.isClaudeAPI {
-                    combinedUsage.calculatedDailyCost += messageCost
-                }
-            }
-        }
-
-        // Only cache full loads (partial month-only data shouldn't pollute cache)
-        if !currentMonthOnly {
-            cacheService.cacheDirectory(directory: directory, usage: combinedUsage)
-        }
-
-        return combinedUsage
-    }
-
-    var recentSessions: [LiveSession] {
-        Array(liveSessions.prefix(5))
-    }
-
-    // MARK: - API Cost Summary
-
-    private let transcriptParser = TranscriptParser()
-    @Published var cachedCostBreakdown = APICostBreakdown()
-    @Published var isLoadingAPICosts = true  // Start true, set false when done
-
-    var hasAPIProjects: Bool {
-        cachedCostBreakdown.hasBedrock || cachedCostBreakdown.hasClaudeAPI
-    }
-
-    var showAPICostCard: Bool {
-        isLoadingAPICosts || hasAPIProjects
-    }
-
-    var hasBedrockProjects: Bool {
-        cachedCostBreakdown.hasBedrock
-    }
-
-    var hasClaudeAPIProjects: Bool {
-        cachedCostBreakdown.hasClaudeAPI
-    }
-
-    var totalAPICost: Double {
-        cachedCostBreakdown.totalAll
-    }
-
-    var monthlyAPICost: Double {
-        cachedCostBreakdown.totalMonthly
-    }
-
-    var dailyAPICost: Double {
-        cachedCostBreakdown.totalDaily
-    }
-
-    var apiCostBreakdown: APICostBreakdown {
-        cachedCostBreakdown
-    }
-
 
     // MARK: - All Time Stats
 
@@ -1158,10 +434,5 @@ final class UsageTrackerViewModel: ObservableObject {
         case 1000..<1_000_000: return String(format: "%.1fK", Double(count) / 1000)
         default: return String(format: "%.1fM", Double(count) / 1_000_000)
         }
-    }
-
-    func formatCost(_ cost: Double) -> String {
-        if cost < 0.01 { return "<$0.01" }
-        return String(format: "$%.2f", cost)
     }
 }

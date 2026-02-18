@@ -21,7 +21,6 @@ let package = Package(
             path: "Sources/ClaudeUsageTracker",
             exclude: ["Secrets.swift.example"],
             resources: [
-                .process("Resources/pricing.json"),
                 .copy("Resources/claude-menu-icon.png"),
                 .copy("Resources/claude-icon.png")
             ]

@@ -144,9 +144,6 @@ struct AccountSettingsTab: View {
                     Label("Subscription", systemImage: "creditcard")
                 }
 
-                // API Pricing Section
-                PricingSection()
-
                 Spacer()
             }
             .padding(20)
@@ -241,29 +238,15 @@ struct AppearanceSettingsTab: View {
         Form {
             Section {
                 Toggle("Session % in Menu Bar", isOn: $settings.showMenuBarPercentage)
-                Toggle("API Cost in Menu Bar", isOn: $settings.showMenuBarAPICost)
-                if settings.showMenuBarAPICost {
-                    Picker("Show Cost", selection: $settings.menuBarAPICostType) {
-                        Text("Today").tag("daily")
-                        Text("This Month").tag("monthly")
-                    }
-                    .pickerStyle(.segmented)
-                }
             } header: {
                 Label("Menu Bar", systemImage: "menubar.rectangle")
-            } footer: {
-                Text("API Cost shows your estimated spending from API usage (Bedrock/Claude API).")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
 
             Section {
-                Toggle("API Cost", isOn: $settings.showAPICost)
                 Toggle("Live Sessions", isOn: $settings.showLiveSessions)
                 Toggle("Rate Limits", isOn: $settings.showRateLimits)
                 Toggle("Activity Trend", isOn: $settings.showTrendChart)
                 Toggle("Model Breakdown", isOn: $settings.showModelBreakdown)
-                Toggle("Recent Projects", isOn: $settings.showRecentProjects)
                 Toggle("All Time Stats", isOn: $settings.showAllTimeStats)
             } header: {
                 Label("Dashboard Cards", systemImage: "rectangle.grid.2x2")
@@ -451,7 +434,7 @@ struct AboutSettingsTab: View {
                 .padding(.horizontal, 20)
 
                 // Description
-                Text("Track your Claude API usage, monitor rate limits, and analyze your productivity with detailed statistics and insights.")
+                Text("Track your Claude usage, monitor rate limits, and analyze your productivity with detailed statistics and insights.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -501,14 +484,13 @@ struct AboutSettingsTab: View {
                 }
                 .padding(.horizontal, 20)
 
-                Text("© \(String(Calendar.current.component(.year, from: Date()))) Rui Branco. All rights reserved.")
+                Text("\u{00A9} \(String(Calendar.current.component(.year, from: Date()))) Rui Branco. All rights reserved.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.bottom, 20)
             }
         }
         .onAppear {
-            // Check for updates when About tab appears (if auto-check enabled and not checked recently)
             if settings.checkForUpdatesAutomatically {
                 let shouldCheck = settings.lastUpdateCheck == nil ||
                     Date().timeIntervalSince(settings.lastUpdateCheck!) > 86400
@@ -547,61 +529,5 @@ struct LinkRow: View {
             }
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Pricing Section (Moved from original)
-
-struct PricingSection: View {
-    private let pricingService = PricingService.shared
-
-    var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Anthropic API & AWS Bedrock (same rates)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-
-                // Use specific model versions for current pricing
-                let opus = pricingService.getPricing(for: "opus-4-5")
-                let sonnet = pricingService.getPricing(for: "sonnet")
-                let haiku = pricingService.getPricing(for: "haiku-4-5")
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Opus 4.5:")
-                            .font(.caption.bold())
-                        Spacer()
-                        Text("in $\(opus.inputPerMTok, specifier: "%.0f") / out $\(opus.outputPerMTok, specifier: "%.0f")")
-                            .font(.caption.monospacedDigit())
-                    }
-                    HStack {
-                        Text("Sonnet:")
-                            .font(.caption.bold())
-                        Spacer()
-                        Text("in $\(sonnet.inputPerMTok, specifier: "%.0f") / out $\(sonnet.outputPerMTok, specifier: "%.0f")")
-                            .font(.caption.monospacedDigit())
-                    }
-                    HStack {
-                        Text("Haiku 4.5:")
-                            .font(.caption.bold())
-                        Spacer()
-                        Text("in $\(haiku.inputPerMTok, specifier: "%.0f") / out $\(haiku.outputPerMTok, specifier: "%.0f")")
-                            .font(.caption.monospacedDigit())
-                    }
-                }
-                .foregroundColor(.secondary)
-
-                let lastUpdated = pricingService.lastUpdated
-                if !lastUpdated.isEmpty {
-                    Text("Updated: \(lastUpdated)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(4)
-        } label: {
-            Label("API Pricing (per 1M tokens)", systemImage: "dollarsign")
-        }
     }
 }
