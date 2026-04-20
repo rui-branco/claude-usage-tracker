@@ -15,24 +15,17 @@ struct LiveSessionsCard: View {
     @State private var confirmKillOrphaned: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.green.opacity(0.5), lineWidth: 2)
-                                .scaleEffect(1.5)
-                        )
-                    Text("Live Sessions")
-                        .font(.subheadline.bold())
-                }
+                Text("LIVE SESSIONS")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundColor(.secondary)
                 Spacer()
-                Text("\(sessions.count) active")
-                    .font(.caption)
-                    .foregroundColor(.green)
+                Text("\(sessions.count) ACTIVE")
+                    .font(.system(size: 9, weight: .medium))
+                    .tracking(0.8)
+                    .foregroundColor(.secondary.opacity(0.7))
             }
 
             if isLoading {
@@ -108,61 +101,60 @@ struct LiveSessionsCard: View {
                         .background(Color.red.opacity(0.1))
                         .cornerRadius(6)
                     } else {
-                        VStack(spacing: 4) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 4) {
-                                        Circle()
-                                            .fill(Color.green)
-                                            .frame(width: 6, height: 6)
-                                        Text(session.projectName)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                        // Show model name if available
-                                        if let modelName = session.modelName {
-                                            Text("(\(modelName))")
-                                                .font(.caption2)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.5))
+                                    .frame(width: 5, height: 5)
+
+                                Text(session.projectName)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+
+                                if let modelName = session.modelName {
+                                    Text(modelName)
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary.opacity(0.6))
+                                        .lineLimit(1)
                                 }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    // Show tokens
+
+                                Spacer(minLength: 6)
+
+                                HStack(spacing: 8) {
                                     if let tokens = session.tokens, tokens > 0 {
                                         Text(formatTokens(tokens))
-                                            .font(.caption)
+                                            .font(.system(size: 10).monospacedDigit())
                                             .foregroundColor(.secondary)
                                     } else {
-                                        Text("— tok")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary.opacity(0.5))
+                                        Text("—")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary.opacity(0.4))
                                     }
-                                    // Always show memory
                                     Text("\(session.memoryMB) MB")
-                                        .font(.caption2)
+                                        .font(.system(size: 10).monospacedDigit())
                                         .foregroundColor(.secondary.opacity(0.7))
                                 }
-                                // X button - animated, only shows on hover
+
                                 if hoveredSession == session.id {
                                     Button(action: {
                                         sessionToKill = session
                                     }) {
                                         Image(systemName: "xmark.circle.fill")
                                             .foregroundColor(.red.opacity(0.7))
-                                            .font(.system(size: 14))
+                                            .font(.system(size: 12))
                                     }
                                     .buttonStyle(.plain)
                                     .help("Stop this session")
                                     .transition(.opacity.combined(with: .scale))
                                 }
                             }
-                            // Context window progress bar (real-time data)
                             if let contextPercent = session.contextPercent {
                                 ContextProgressBar(percent: contextPercent)
+                                    .padding(.leading, 13)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 1)
                         .onHover { isHovered in
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 hoveredSession = isHovered ? session.id : nil
@@ -225,13 +217,6 @@ struct LiveSessionsCard: View {
                 }
             }
         }
-        .padding()
-        .background(Color(.windowBackgroundColor))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(sessions.isEmpty ? Color.clear : Color.green.opacity(0.3), lineWidth: 1)
-        )
     }
 
     private func formatTokens(_ count: Int) -> String {
