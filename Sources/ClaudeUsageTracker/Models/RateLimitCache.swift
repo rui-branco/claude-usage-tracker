@@ -212,6 +212,78 @@ struct RateLimitStatus {
         return "Limit ~\(formatter.string(from: limitDate))"
     }
 
+    // MARK: - Always-visible progress rate (3-5 min rolling window)
+
+    /// Session %/hour burn rate (rolling recent window), formatted.
+    var sessionBurnRateFormatted: String? {
+        guard let rate = recentSessionBurnRate, rate > 0.05 else { return nil }
+        return String(format: "+%.1f%%/hr", rate)
+    }
+
+    /// Weekly %/hour burn rate (rolling recent window), formatted.
+    var weeklyBurnRateFormatted: String? {
+        guard let rate = recentWeeklyBurnRate, rate > 0.01 else { return nil }
+        return String(format: "+%.2f%%/hr", rate)
+    }
+
+    /// True when the current burn rate will push session past 100% before reset.
+    var sessionEndsBeforeReset: Bool {
+        guard fiveHourUsedPercent < 100, let rate = recentSessionBurnRate, rate > 0 else { return false }
+        let hoursToFull = (100.0 - fiveHourUsedPercent) / rate
+        return Date().addingTimeInterval(hoursToFull * 3600) < fiveHourResetAt
+    }
+
+    /// True when the current burn rate will push weekly past 100% before reset.
+    var weeklyEndsBeforeReset: Bool {
+        guard sevenDayUsedPercent < 100, let rate = recentWeeklyBurnRate, rate > 0 else { return false }
+        let hoursToFull = (100.0 - sevenDayUsedPercent) / rate
+        return Date().addingTimeInterval(hoursToFull * 3600) < sevenDayResetAt
+    }
+
+    /// ETA line for session:
+    /// - `Ends HH:mm` — warning, will hit 100% before reset
+    /// - `~X% by reset` — reassurance, safe this window
+    var sessionETAFormatted: String? {
+        guard fiveHourUsedPercent < 100 else { return "At 100%" }
+        guard let rate = recentSessionBurnRate, rate > 0 else { return nil }
+
+        let remaining = 100.0 - fiveHourUsedPercent
+        let hoursToFull = remaining / rate
+        let etaDate = Date().addingTimeInterval(hoursToFull * 3600)
+
+        if etaDate < fiveHourResetAt {
+            let formatter = DateFormatter()
+            formatter.dateFormat = hoursToFull < 24 ? "HH:mm" : "EEE HH:mm"
+            return "Ends \(formatter.string(from: etaDate))"
+        }
+
+        if let projected = sessionProjectedPercent {
+            return String(format: "~%d%% by reset", Int(projected.rounded()))
+        }
+        return "Safe this window"
+    }
+
+    /// ETA line for weekly, same shape as session.
+    var weeklyETAFormatted: String? {
+        guard sevenDayUsedPercent < 100 else { return "At 100%" }
+        guard let rate = recentWeeklyBurnRate, rate > 0 else { return nil }
+
+        let remaining = 100.0 - sevenDayUsedPercent
+        let hoursToFull = remaining / rate
+        let etaDate = Date().addingTimeInterval(hoursToFull * 3600)
+
+        if etaDate < sevenDayResetAt {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEE HH:mm"
+            return "Ends \(formatter.string(from: etaDate))"
+        }
+
+        if let projected = weeklyProjectedPercent {
+            return String(format: "~%d%% by reset", Int(projected.rounded()))
+        }
+        return "Safe this week"
+    }
+
     enum Status {
         case healthy, warning, critical
 

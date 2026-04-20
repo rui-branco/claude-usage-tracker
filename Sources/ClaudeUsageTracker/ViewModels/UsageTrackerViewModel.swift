@@ -212,14 +212,36 @@ final class UsageTrackerViewModel: ObservableObject {
         return enrichedSessions
     }
 
-    // Track previous values for burn rate calculation
-    private var lastSessionPercent: Int?
-    private var lastWeeklyPercent: Int?
-    private var lastRateLimitUpdate: Date?
+    // Rolling sample buffer for burn rate over a 3-5 minute window.
+    // Samples retained up to rateMaxRetainSeconds so we always have one that is
+    // at least rateMinWindowSeconds old to compute against.
+    private struct RateSample {
+        let timestamp: Date
+        let percent: Int
+    }
+    private var sessionSamples: [RateSample] = []
+    private var weeklySamples: [RateSample] = []
 
-    // Smoothed burn rates (exponential moving average)
-    private var smoothedSessionRate: Double = 0
-    private var smoothedWeeklyRate: Double = 0
+    private let rateMinWindowSeconds: TimeInterval = 180   // 3 min minimum
+    private let rateMaxRetainSeconds: TimeInterval = 600   // 10 min retained
+
+    private func recordSample(_ samples: inout [RateSample], percent: Int, now: Date) {
+        samples.append(RateSample(timestamp: now, percent: percent))
+        let cutoff = now.addingTimeInterval(-rateMaxRetainSeconds)
+        samples.removeAll { $0.timestamp < cutoff }
+    }
+
+    /// Rate in %/hour computed against the oldest retained sample (3-10 min window).
+    /// Using the widest available window is more accurate at low burn rates, since
+    /// the API returns integer percents and a 3-min delta can round to 0.
+    private func recentBurnRate(samples: [RateSample], current: Int, now: Date) -> Double? {
+        guard let oldest = samples.first else { return nil }
+        let elapsed = now.timeIntervalSince(oldest.timestamp)
+        guard elapsed >= rateMinWindowSeconds else { return nil }
+        let hoursDelta = elapsed / 3600.0
+        let delta = Double(current - oldest.percent)
+        return max(delta / hoursDelta, 0)
+    }
 
     private func updateRateLimitStatus(from cache: RateLimitCache?) {
         guard let cache = cache else {
@@ -235,42 +257,12 @@ final class UsageTrackerViewModel: ObservableObject {
         let fiveHourReset = formatter.date(from: cache.data.fiveHourResetAt) ?? Date()
         let sevenDayReset = formatter.date(from: cache.data.sevenDayResetAt) ?? Date()
 
-        // Calculate recent burn rates based on change since last update
-        var recentSessionRate: Double?
-        var recentWeeklyRate: Double?
+        let now = Date()
+        recordSample(&sessionSamples, percent: cache.data.fiveHour, now: now)
+        recordSample(&weeklySamples, percent: cache.data.sevenDay, now: now)
 
-        if let lastUpdate = lastRateLimitUpdate,
-           let lastSession = lastSessionPercent,
-           let lastWeekly = lastWeeklyPercent {
-
-            let timeDelta = Date().timeIntervalSince(lastUpdate)
-
-            if timeDelta >= 10 {
-                let hoursDelta = timeDelta / 3600.0
-
-                let sessionDelta = cache.data.fiveHour - lastSession
-                if sessionDelta > 0 {
-                    let instantRate = Double(sessionDelta) / hoursDelta
-                    smoothedSessionRate = 0.7 * instantRate + 0.3 * smoothedSessionRate
-                    recentSessionRate = smoothedSessionRate
-                } else if sessionDelta < 0 {
-                    smoothedSessionRate = 0
-                }
-
-                let weeklyDelta = cache.data.sevenDay - lastWeekly
-                if weeklyDelta > 0 {
-                    let instantRate = Double(weeklyDelta) / hoursDelta
-                    smoothedWeeklyRate = 0.7 * instantRate + 0.3 * smoothedWeeklyRate
-                    recentWeeklyRate = smoothedWeeklyRate
-                } else if weeklyDelta < 0 {
-                    smoothedWeeklyRate = 0
-                }
-            }
-        }
-
-        lastSessionPercent = cache.data.fiveHour
-        lastWeeklyPercent = cache.data.sevenDay
-        lastRateLimitUpdate = Date()
+        let recentSessionRate = recentBurnRate(samples: sessionSamples, current: cache.data.fiveHour, now: now)
+        let recentWeeklyRate = recentBurnRate(samples: weeklySamples, current: cache.data.sevenDay, now: now)
 
         var status = RateLimitStatus(
             planName: cache.data.planName,
@@ -280,8 +272,8 @@ final class UsageTrackerViewModel: ObservableObject {
             sevenDayResetAt: sevenDayReset
         )
 
-        status.recentSessionBurnRate = recentSessionRate ?? smoothedSessionRate
-        status.recentWeeklyBurnRate = recentWeeklyRate ?? smoothedWeeklyRate
+        status.recentSessionBurnRate = recentSessionRate
+        status.recentWeeklyBurnRate = recentWeeklyRate
 
         rateLimitStatus = status
 
