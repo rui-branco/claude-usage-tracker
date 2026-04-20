@@ -1,6 +1,19 @@
 import SwiftUI
 import AppKit
 
+// Fade-gradient hairline used to separate major sections.
+struct SectionSeparator: View {
+    var body: some View {
+        LinearGradient(
+            colors: [.clear, Color.secondary.opacity(0.28), .clear],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(height: 1)
+        .padding(.vertical, 4)
+    }
+}
+
 // Claude icon for header - loaded from bundle PNG with orange tint
 struct ClaudeHeaderIcon: View {
     private var iconImage: NSImage? {
@@ -36,10 +49,14 @@ struct MenuBarView: View {
 
             // Content
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: 16) {
                     // Rate Limits
                     if settings.showRateLimits, let rateLimit = viewModel.rateLimitStatus {
                         RateLimitCard(rateLimit: rateLimit)
+                    }
+
+                    if settings.showRateLimits && settings.showLiveSessions {
+                        SectionSeparator()
                     }
 
                     // Live Sessions
@@ -58,84 +75,18 @@ struct MenuBarView: View {
                             }
                         )
                     }
-
-                    // Show Details toggle
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            viewModel.showDetails.toggle()
-                        }
-                    }) {
-                        HStack {
-                            Text(viewModel.showDetails ? "Hide Details" : "Show Details")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Image(systemName: viewModel.showDetails ? "chevron.up" : "chevron.down")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 4)
-                    }
-                    .buttonStyle(.plain)
-
-                    if viewModel.showDetails {
-                        // Period Stats with Time Picker
-                        periodStatsCard
-
-                        // Trend Chart
-                        if settings.showTrendChart && !viewModel.filteredActivity.isEmpty {
-                            CollapsibleCard(
-                                title: "Activity Trend",
-                                icon: "chart.line.uptrend.xyaxis",
-                                count: nil,
-                                isExpanded: $viewModel.isTrendExpanded
-                            ) {
-                                TrendChartView(data: viewModel.filteredActivity)
-                                    .frame(height: 80)
-                            }
-                        }
-
-                        // Model Breakdown
-                        if settings.showModelBreakdown && !viewModel.periodTokensByModel.isEmpty {
-                            CollapsibleCard(
-                                title: "Models",
-                                icon: "cpu",
-                                count: viewModel.periodTokensByModel.count,
-                                isExpanded: $viewModel.isModelsExpanded
-                            ) {
-                                VStack(spacing: 6) {
-                                    ForEach(viewModel.periodTokensByModel, id: \.name) { model in
-                                        HStack {
-                                            Circle()
-                                                .fill(model.color)
-                                                .frame(width: 8, height: 8)
-                                            Text(model.displayName)
-                                                .font(.caption)
-                                            Spacer()
-                                            Text(viewModel.formatTokenCount(model.tokens))
-                                                .font(.caption.monospacedDigit())
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // All Time Totals
-                        if settings.showAllTimeStats && viewModel.selectedTimeFrame != .all {
-                            allTimeSection
-                        }
-                    }
                 }
                 .padding()
             }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: 520)
 
             Divider()
 
             // Footer
             footerView
         }
-        .frame(width: 320, height: 580)
+        .frame(width: 320)
     }
 
     private var headerView: some View {
@@ -166,83 +117,6 @@ struct MenuBarView: View {
             }
         }
         .padding()
-    }
-
-    private var periodStatsCard: some View {
-        VStack(spacing: 8) {
-            // Time picker integrated
-            TimeFramePicker(selection: $viewModel.selectedTimeFrame)
-
-            Divider()
-                .padding(.vertical, 4)
-
-            HStack {
-                Text(viewModel.formatTokenCount(viewModel.periodTokens) + " tokens")
-                    .font(.caption.monospacedDigit())
-                    .foregroundColor(.accentColor)
-                Spacer()
-            }
-
-            HStack(spacing: 0) {
-                StatItem(
-                    title: "Messages",
-                    value: "\(viewModel.periodMessages)",
-                    icon: "message.fill"
-                )
-                Divider().frame(height: 40)
-                StatItem(
-                    title: "Sessions",
-                    value: "\(viewModel.periodSessions)",
-                    icon: "terminal.fill"
-                )
-                Divider().frame(height: 40)
-                StatItem(
-                    title: "Tools",
-                    value: "\(viewModel.periodToolCalls)",
-                    icon: "wrench.fill"
-                )
-            }
-        }
-        .padding()
-        .background(Color(.windowBackgroundColor))
-        .cornerRadius(10)
-    }
-
-    private var allTimeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("All Time")
-                .font(.subheadline.bold())
-
-            HStack {
-                Label("\(viewModel.totalSessions)", systemImage: "folder")
-                    .font(.caption)
-                Spacer()
-                Text("Sessions")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            HStack {
-                Label("\(viewModel.totalMessages)", systemImage: "message")
-                    .font(.caption)
-                Spacer()
-                Text("Messages")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            HStack {
-                Label(viewModel.formatTokenCount(viewModel.totalTokens), systemImage: "textformat.123")
-                    .font(.caption)
-                Spacer()
-                Text("Total Tokens")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding()
-        .background(Color(.windowBackgroundColor))
-        .cornerRadius(10)
     }
 
     private var footerView: some View {

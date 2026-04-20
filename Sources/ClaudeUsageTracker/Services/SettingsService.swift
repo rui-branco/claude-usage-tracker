@@ -10,9 +10,6 @@ final class SettingsService: ObservableObject {
     @Published var refreshInterval: Int {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval") }
     }
-    @Published var defaultTimeFrame: String {
-        didSet { UserDefaults.standard.set(defaultTimeFrame, forKey: "defaultTimeFrame") }
-    }
 
     // MARK: - Visibility Settings
     @Published var showLiveSessions: Bool {
@@ -21,15 +18,6 @@ final class SettingsService: ObservableObject {
     @Published var showRateLimits: Bool {
         didSet { UserDefaults.standard.set(showRateLimits, forKey: "showRateLimits") }
     }
-    @Published var showTrendChart: Bool {
-        didSet { UserDefaults.standard.set(showTrendChart, forKey: "showTrendChart") }
-    }
-    @Published var showModelBreakdown: Bool {
-        didSet { UserDefaults.standard.set(showModelBreakdown, forKey: "showModelBreakdown") }
-    }
-    @Published var showAllTimeStats: Bool {
-        didSet { UserDefaults.standard.set(showAllTimeStats, forKey: "showAllTimeStats") }
-    }
 
     // MARK: - Display Settings
     @Published var showMenuBarPercentage: Bool {
@@ -37,9 +25,6 @@ final class SettingsService: ObservableObject {
     }
     @Published var compactMode: Bool {
         didSet { UserDefaults.standard.set(compactMode, forKey: "compactMode") }
-    }
-    @Published var showTokenCounts: Bool {
-        didSet { UserDefaults.standard.set(showTokenCounts, forKey: "showTokenCounts") }
     }
 
     // MARK: - Notification Settings
@@ -76,17 +61,12 @@ final class SettingsService: ObservableObject {
             // General
             "autoRefreshEnabled": true,
             "refreshInterval": 5,
-            "defaultTimeFrame": "7D",
             // Visibility
             "showLiveSessions": true,
             "showRateLimits": true,
-            "showTrendChart": true,
-            "showModelBreakdown": true,
-            "showAllTimeStats": true,
             // Display
             "showMenuBarPercentage": true,
             "compactMode": false,
-            "showTokenCounts": true,
             // Notifications
             "notificationsEnabled": true,
             "rateLimitWarningThreshold": 80,
@@ -100,17 +80,12 @@ final class SettingsService: ObservableObject {
         // Load values
         self.autoRefreshEnabled = defaults.bool(forKey: "autoRefreshEnabled")
         self.refreshInterval = defaults.integer(forKey: "refreshInterval")
-        self.defaultTimeFrame = defaults.string(forKey: "defaultTimeFrame") ?? "7D"
 
         self.showLiveSessions = defaults.bool(forKey: "showLiveSessions")
         self.showRateLimits = defaults.bool(forKey: "showRateLimits")
-        self.showTrendChart = defaults.bool(forKey: "showTrendChart")
-        self.showModelBreakdown = defaults.bool(forKey: "showModelBreakdown")
-        self.showAllTimeStats = defaults.bool(forKey: "showAllTimeStats")
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
         self.compactMode = defaults.bool(forKey: "compactMode")
-        self.showTokenCounts = defaults.bool(forKey: "showTokenCounts")
 
         self.notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         self.rateLimitWarningThreshold = defaults.integer(forKey: "rateLimitWarningThreshold")
@@ -157,15 +132,10 @@ final class SettingsService: ObservableObject {
         // Reload defaults
         autoRefreshEnabled = true
         refreshInterval = 5
-        defaultTimeFrame = "7D"
         showLiveSessions = true
         showRateLimits = true
-        showTrendChart = true
-        showModelBreakdown = true
-        showAllTimeStats = true
         showMenuBarPercentage = true
         compactMode = false
-        showTokenCounts = true
         notificationsEnabled = true
         rateLimitWarningThreshold = 80
         cacheRetentionDays = 90

@@ -195,18 +195,6 @@ struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Default Time Frame", selection: $settings.defaultTimeFrame) {
-                    Text("Today").tag("1D")
-                    Text("7 Days").tag("7D")
-                    Text("30 Days").tag("1M")
-                    Text("3 Months").tag("3M")
-                    Text("All Time").tag("All")
-                }
-            } header: {
-                Label("Startup", systemImage: "power")
-            }
-
-            Section {
                 Toggle("Enable Auto-Refresh", isOn: $settings.autoRefreshEnabled)
 
                 if settings.autoRefreshEnabled {
@@ -243,19 +231,10 @@ struct AppearanceSettingsTab: View {
             }
 
             Section {
-                Toggle("Live Sessions", isOn: $settings.showLiveSessions)
                 Toggle("Rate Limits", isOn: $settings.showRateLimits)
-                Toggle("Activity Trend", isOn: $settings.showTrendChart)
-                Toggle("Model Breakdown", isOn: $settings.showModelBreakdown)
-                Toggle("All Time Stats", isOn: $settings.showAllTimeStats)
+                Toggle("Live Sessions", isOn: $settings.showLiveSessions)
             } header: {
-                Label("Dashboard Cards", systemImage: "rectangle.grid.2x2")
-            }
-
-            Section {
-                Toggle("Show Token Counts", isOn: $settings.showTokenCounts)
-            } header: {
-                Label("Display Options", systemImage: "textformat.size")
+                Label("Sections", systemImage: "rectangle.grid.2x2")
             }
         }
         .formStyle(.grouped)
