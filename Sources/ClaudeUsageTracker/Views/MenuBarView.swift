@@ -40,6 +40,25 @@ struct MenuBarView: View {
     @ObservedObject var viewModel: UsageTrackerViewModel
     @ObservedObject var settings: SettingsService
 
+    // Actual measured content height, written by the GeometryReader below.
+    @State private var measuredHeight: CGFloat = 0
+
+    // Cap scroll area to a sensible fraction of available screen height so
+    // the popover never overlaps the footer, regardless of how many sessions are live.
+    private var maxScrollHeight: CGFloat {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+        // Reserve ~220pt for menu bar, header, footer, dividers, and breathing room.
+        return max(240, screenHeight - 220)
+    }
+
+    private var scrollHeight: CGFloat {
+        // Before first measurement, give the ScrollView a tiny seed so content
+        // lays out at its natural size (vertical ScrollView proposes unbounded
+        // height to content), then shrink to the measured height on next pass.
+        let base = measuredHeight > 0 ? measuredHeight : 1
+        return min(max(base, 1), maxScrollHeight)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -77,9 +96,20 @@ struct MenuBarView: View {
                     }
                 }
                 .padding()
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                let h = proxy.size.height
+                                if h > 0 { measuredHeight = h }
+                            }
+                            .onChange(of: proxy.size.height) { newValue in
+                                if newValue > 0 { measuredHeight = newValue }
+                            }
+                    }
+                )
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxHeight: 520)
+            .frame(height: scrollHeight)
 
             Divider()
 
