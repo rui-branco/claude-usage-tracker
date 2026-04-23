@@ -1,1 +1,4 @@
-- Minor improvements to release process
+- Simplified to sessions-only tracking (removed API cost tracking)
+- Redesigned rate limit card with rolling burn rate and ETA pills
+- Flatter, cleaner menu bar UI with muted palette
+- Popover now resizes dynamically to its content
