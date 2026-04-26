@@ -225,9 +225,17 @@ struct AppearanceSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Session % in Menu Bar", isOn: $settings.showMenuBarPercentage)
+                Toggle("Show percentages in Menu Bar", isOn: $settings.showMenuBarPercentage)
+                if settings.showMenuBarPercentage {
+                    Toggle("Include Codex %", isOn: $settings.showCodexInMenuBar)
+                        .padding(.leading, 16)
+                }
             } header: {
                 Label("Menu Bar", systemImage: "menubar.rectangle")
+            } footer: {
+                Text("Claude % is shown in orange, Codex % in green.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section {
@@ -235,6 +243,17 @@ struct AppearanceSettingsTab: View {
                 Toggle("Live Sessions", isOn: $settings.showLiveSessions)
             } header: {
                 Label("Sections", systemImage: "rectangle.grid.2x2")
+            }
+
+            Section {
+                Toggle("Codex rate limits", isOn: $settings.showCodexRateLimits)
+                Toggle("Codex sessions in list", isOn: $settings.showCodexSessions)
+            } header: {
+                Label("Codex", systemImage: "terminal.fill")
+            } footer: {
+                Text("Codex data is read from ~/.codex/sessions/ and the local process list.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -294,21 +313,8 @@ struct DataSettingsTab: View {
             }
 
             Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Claude Data Location")
-                        .font(.subheadline)
-                    HStack {
-                        Text("~/.claude/")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Button("Open in Finder") {
-                            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-                            NSWorkspace.shared.open(URL(fileURLWithPath: "\(homeDir)/.claude"))
-                        }
-                        .buttonStyle(.link)
-                    }
-                }
+                DataLocationRow(label: "Claude Data Location", path: "~/.claude/")
+                DataLocationRow(label: "Codex Data Location", path: "~/.codex/")
             } header: {
                 Label("File Locations", systemImage: "folder")
             }
@@ -413,7 +419,7 @@ struct AboutSettingsTab: View {
                 .padding(.horizontal, 20)
 
                 // Description
-                Text("Track your Claude usage, monitor rate limits, and analyze your productivity with detailed statistics and insights.")
+                Text("Track Claude and Codex usage from one menu bar icon — rate limits, live sessions, and percentages at a glance.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -479,6 +485,30 @@ struct AboutSettingsTab: View {
                         settings.lastUpdateCheck = Date()
                     }
                 }
+            }
+        }
+    }
+}
+
+struct DataLocationRow: View {
+    let label: String
+    let path: String   // e.g. "~/.codex/"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.subheadline)
+            HStack {
+                Text(path)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Open in Finder") {
+                    let home = FileManager.default.homeDirectoryForCurrentUser.path
+                    let resolved = path.replacingOccurrences(of: "~", with: home)
+                    NSWorkspace.shared.open(URL(fileURLWithPath: resolved))
+                }
+                .buttonStyle(.link)
             }
         }
     }

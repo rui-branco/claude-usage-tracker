@@ -47,17 +47,32 @@ struct SessionMenuBarLabel: View {
             ClaudeMenuIcon()
 
             if settings.showMenuBarPercentage {
-                // Show time until reset only if at 100% AND reset time is in the future
-                if let resetAt = state.fiveHourResetAt,
-                   state.sessionPercent ?? 0 >= 100,
-                   resetAt > currentTime {
-                    // At 100% with future reset - show time until reset
+                let codexVisible = settings.showCodexInMenuBar && state.codexSessionPercent != nil
+                let showResetCountdown = (state.sessionPercent ?? 0) >= 100
+                    && state.fiveHourResetAt.map { $0 > currentTime } ?? false
+                    && !codexVisible  // only when Claude is alone
+
+                if showResetCountdown, let resetAt = state.fiveHourResetAt {
                     Text(formatTimeUntil(resetAt))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
-                } else if let percent = state.sessionPercent {
-                    // Normal or reset time passed - show percentage
-                    Text("\(percent)%")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                } else {
+                    HStack(spacing: 3) {
+                        if let claude = state.sessionPercent {
+                            Text("\(claude)%")
+                                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                .foregroundColor(.orange)
+                        }
+                        if state.sessionPercent != nil && codexVisible {
+                            Text("·")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        if codexVisible, let codex = state.codexSessionPercent {
+                            Text("\(codex)%")
+                                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                .foregroundColor(.green)
+                        }
+                    }
                 }
             }
         }
@@ -84,6 +99,7 @@ class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
     @Published var fiveHourResetAt: Date?
+    @Published var codexSessionPercent: Int?
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -153,7 +169,11 @@ struct AppContentView: View {
     var body: some View {
         Group {
             if appState.isLoaded {
-                MenuBarView(viewModel: appState.viewModel!, settings: appState.settings)
+                MenuBarView(
+                    viewModel: appState.viewModel!,
+                    settings: appState.settings,
+                    codexService: appState.codexService!
+                )
             } else {
                 VStack {
                     ProgressView()
@@ -172,6 +192,7 @@ class AppState: ObservableObject {
 
     @Published var isLoaded = false
     @Published var viewModel: UsageTrackerViewModel?
+    @Published var codexService: CodexService?
     let settings = SettingsService.shared
 
     private var fileWatcher: FileWatcherService?
@@ -183,13 +204,16 @@ class AppState: ObservableObject {
         // Create services
         let fw = FileWatcherService()
         let pm = ProcessMonitorService()
+        let codex = CodexService()
 
         fileWatcher = fw
         processMonitor = pm
+        codexService = codex
 
         // Start services
         fw.start()
         pm.startMonitoring()
+        codex.start()
 
         // Create view model
         viewModel = UsageTrackerViewModel(fileWatcher: fw, processMonitor: pm)

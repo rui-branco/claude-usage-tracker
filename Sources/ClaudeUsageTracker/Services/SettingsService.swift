@@ -18,6 +18,15 @@ final class SettingsService: ObservableObject {
     @Published var showRateLimits: Bool {
         didSet { UserDefaults.standard.set(showRateLimits, forKey: "showRateLimits") }
     }
+    @Published var showCodexRateLimits: Bool {
+        didSet { UserDefaults.standard.set(showCodexRateLimits, forKey: "showCodexRateLimits") }
+    }
+    @Published var showCodexSessions: Bool {
+        didSet { UserDefaults.standard.set(showCodexSessions, forKey: "showCodexSessions") }
+    }
+    @Published var showCodexInMenuBar: Bool {
+        didSet { UserDefaults.standard.set(showCodexInMenuBar, forKey: "showCodexInMenuBar") }
+    }
 
     // MARK: - Display Settings
     @Published var showMenuBarPercentage: Bool {
@@ -64,6 +73,9 @@ final class SettingsService: ObservableObject {
             // Visibility
             "showLiveSessions": true,
             "showRateLimits": true,
+            "showCodexRateLimits": true,
+            "showCodexSessions": true,
+            "showCodexInMenuBar": true,
             // Display
             "showMenuBarPercentage": true,
             "compactMode": false,
@@ -83,6 +95,21 @@ final class SettingsService: ObservableObject {
 
         self.showLiveSessions = defaults.bool(forKey: "showLiveSessions")
         self.showRateLimits = defaults.bool(forKey: "showRateLimits")
+
+        // Migrate the legacy single `showCodex` key into the new granular toggles
+        // the first time we run with this build.
+        if defaults.object(forKey: "showCodex") != nil
+            && defaults.object(forKey: "showCodexRateLimits") == nil
+            && defaults.object(forKey: "showCodexSessions") == nil {
+            let legacy = defaults.bool(forKey: "showCodex")
+            defaults.set(legacy, forKey: "showCodexRateLimits")
+            defaults.set(legacy, forKey: "showCodexSessions")
+            defaults.set(legacy, forKey: "showCodexInMenuBar")
+            defaults.removeObject(forKey: "showCodex")
+        }
+        self.showCodexRateLimits = defaults.bool(forKey: "showCodexRateLimits")
+        self.showCodexSessions = defaults.bool(forKey: "showCodexSessions")
+        self.showCodexInMenuBar = defaults.bool(forKey: "showCodexInMenuBar")
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
         self.compactMode = defaults.bool(forKey: "compactMode")
@@ -134,6 +161,9 @@ final class SettingsService: ObservableObject {
         refreshInterval = 5
         showLiveSessions = true
         showRateLimits = true
+        showCodexRateLimits = true
+        showCodexSessions = true
+        showCodexInMenuBar = true
         showMenuBarPercentage = true
         compactMode = false
         notificationsEnabled = true

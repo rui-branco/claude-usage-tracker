@@ -1,32 +1,73 @@
 import SwiftUI
 
 struct RateLimitCard: View {
-    let rateLimit: RateLimitStatus
+    let rateLimit: RateLimitStatus?
+    var codexLimits: CodexRateLimitStatus? = nil
     @State private var refreshTrigger = Date()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            RateLimitBar(
-                label: "Session",
-                percent: rateLimit.fiveHourUsedPercent,
-                resetText: formatTimeUntil(rateLimit.fiveHourResetAt),
-                estimatedTimeToLimit: rateLimit.sessionTimeUntilLimitFormatted,
-                burnRateText: rateLimit.sessionBurnRateFormatted,
-                etaToFullText: rateLimit.sessionETAFormatted,
-                etaIsWarning: rateLimit.sessionEndsBeforeReset,
-                tickCount: 5
-            )
+            if rateLimit == nil && codexLimits != nil {
+                // Codex has data but Claude API is unreachable — make it explicit.
+                VStack(alignment: .leading, spacing: 4) {
+                    SourceLabel(text: "CLAUDE", color: .orange)
+                    Text("Anthropic usage API unavailable (rate-limited). Will retry.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                Divider().opacity(0.4)
+            }
 
-            RateLimitBar(
-                label: "Weekly",
-                percent: rateLimit.sevenDayUsedPercent,
-                resetText: formatResetDay(rateLimit.sevenDayResetAt),
-                estimatedTimeToLimit: rateLimit.weeklyTimeUntilLimitFormatted,
-                burnRateText: rateLimit.weeklyBurnRateFormatted,
-                etaToFullText: rateLimit.weeklyETAFormatted,
-                etaIsWarning: rateLimit.weeklyEndsBeforeReset,
-                tickCount: 7
-            )
+            if let rateLimit = rateLimit {
+                if codexLimits != nil {
+                    SourceLabel(text: "CLAUDE", color: .orange)
+                }
+
+                RateLimitBar(
+                    label: "Session",
+                    percent: rateLimit.fiveHourUsedPercent,
+                    resetText: formatTimeUntil(rateLimit.fiveHourResetAt),
+                    estimatedTimeToLimit: rateLimit.sessionTimeUntilLimitFormatted,
+                    burnRateText: rateLimit.sessionBurnRateFormatted,
+                    etaToFullText: rateLimit.sessionETAFormatted,
+                    etaIsWarning: rateLimit.sessionEndsBeforeReset,
+                    tickCount: 5
+                )
+
+                RateLimitBar(
+                    label: "Weekly",
+                    percent: rateLimit.sevenDayUsedPercent,
+                    resetText: formatResetDay(rateLimit.sevenDayResetAt),
+                    estimatedTimeToLimit: rateLimit.weeklyTimeUntilLimitFormatted,
+                    burnRateText: rateLimit.weeklyBurnRateFormatted,
+                    etaToFullText: rateLimit.weeklyETAFormatted,
+                    etaIsWarning: rateLimit.weeklyEndsBeforeReset,
+                    tickCount: 7
+                )
+            }
+
+            if let codex = codexLimits {
+                if rateLimit != nil {
+                    Divider().opacity(0.4)
+                }
+                SourceLabel(text: "CODEX\(codex.planType.isEmpty ? "" : " · \(codex.planType.uppercased())")", color: .green)
+
+                // When the saved reset has elapsed the window has rolled over —
+                // show the bar at 0% rather than carrying the stale percentage.
+                RateLimitBar(
+                    label: "Session",
+                    percent: codex.primaryIsStale ? 0 : codex.primaryUsedPercent,
+                    resetText: codex.primaryIsStale ? "—" : formatTimeUntil(codex.primaryResetAt),
+                    tickCount: 5
+                )
+
+                RateLimitBar(
+                    label: "Weekly",
+                    percent: codex.secondaryIsStale ? 0 : codex.secondaryUsedPercent,
+                    resetText: codex.secondaryIsStale ? "—" : formatResetDay(codex.secondaryResetAt),
+                    tickCount: 7
+                )
+            }
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
             refreshTrigger = time
@@ -51,6 +92,53 @@ struct RateLimitCard: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE HH:mm"
         return formatter.string(from: date)
+    }
+}
+
+// Shown when codex's saved reset time has elapsed — the percent we cached is from
+// a previous window and there's no fresh observation to replace it yet.
+struct StaleBarPlaceholder: View {
+    let label: String
+    let lastSeen: Date
+
+    var body: some View {
+        HStack {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.2)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text("NO RECENT DATA · \(timeAgo(lastSeen))")
+                .font(.system(size: 9, weight: .medium))
+                .tracking(0.8)
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+    }
+
+    private func timeAgo(_ date: Date) -> String {
+        let interval = -date.timeIntervalSinceNow
+        if interval < 3600 { return "\(Int(interval / 60))M AGO" }
+        if interval < 86400 { return "\(Int(interval / 3600))H AGO" }
+        return "\(Int(interval / 86400))D AGO"
+    }
+}
+
+// Small uppercase tag identifying the source (Claude / Codex) inside a shared card.
+struct SourceLabel: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(1.4)
+                .foregroundColor(.secondary)
+            Spacer()
+        }
     }
 }
 

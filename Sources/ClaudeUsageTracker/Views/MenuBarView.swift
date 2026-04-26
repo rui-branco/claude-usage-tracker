@@ -39,6 +39,7 @@ struct ClaudeHeaderIcon: View {
 struct MenuBarView: View {
     @ObservedObject var viewModel: UsageTrackerViewModel
     @ObservedObject var settings: SettingsService
+    @ObservedObject var codexService: CodexService
 
     // Actual measured content height, written by the GeometryReader below.
     @State private var measuredHeight: CGFloat = 0
@@ -61,24 +62,22 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            headerView
-
-            Divider()
-
-            // Content
+            // Content (header removed — popover opens straight into the data)
             ScrollView {
                 VStack(spacing: 16) {
-                    // Rate Limits
-                    if settings.showRateLimits, let rateLimit = viewModel.rateLimitStatus {
-                        RateLimitCard(rateLimit: rateLimit)
+                    // Rate Limits (Claude + Codex together)
+                    if settings.showRateLimits, viewModel.rateLimitStatus != nil || (settings.showCodexRateLimits && codexService.rateLimits != nil) {
+                        RateLimitCard(
+                            rateLimit: viewModel.rateLimitStatus,
+                            codexLimits: settings.showCodexRateLimits ? codexService.rateLimits : nil
+                        )
                     }
 
                     if settings.showRateLimits && settings.showLiveSessions {
                         SectionSeparator()
                     }
 
-                    // Live Sessions
+                    // Live Sessions (Claude + Codex in one list)
                     if settings.showLiveSessions {
                         LiveSessionsCard(
                             sessions: viewModel.liveClaudeSessions,
@@ -86,6 +85,7 @@ struct MenuBarView: View {
                             currentSession: viewModel.sessionCache,
                             orphanedCount: viewModel.orphanedSessionCount,
                             orphanedMemoryMB: viewModel.orphanedMemoryMB,
+                            codexSessions: settings.showCodexSessions ? codexService.sessions : [],
                             onKillSession: { session in
                                 viewModel.killSession(session)
                             },
@@ -119,36 +119,6 @@ struct MenuBarView: View {
         .frame(width: 320)
     }
 
-    private var headerView: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    ClaudeHeaderIcon()
-                    Text("Claude Usage Tracker")
-                        .font(.headline)
-                }
-                if let updated = viewModel.lastUpdated {
-                    Text("Updated \(updated, formatter: timeFormatter)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Spacer()
-
-            // Plan badge
-            if let rateLimit = viewModel.rateLimitStatus {
-                Text(rateLimit.planName)
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.2))
-                    .cornerRadius(4)
-            }
-        }
-        .padding()
-    }
-
     private var footerView: some View {
         HStack {
             Button(action: { NSApplication.shared.terminate(nil) }) {
@@ -177,12 +147,6 @@ struct MenuBarView: View {
             }
         }
         .padding()
-    }
-
-    private var timeFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter
     }
 
     private func openSettings() {
