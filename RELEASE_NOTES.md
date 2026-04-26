@@ -1,7 +1,1 @@
-- Added Codex (OpenAI) tracking alongside Claude — rate limits and live sessions now cover both tools
-- Codex 5h and weekly rate limit bars rendered next to Claude's, with stale windows shown as 0%
-- Codex live sessions appear in the unified Live Sessions list (tagged "codex"), one per running process
-- Menu bar percentage now shows both — Claude in orange, Codex in green
-- Persisted Claude rate limits across launches and added 429 backoff so Anthropic API hiccups no longer blank the UI
-- Removed the popover header for a cleaner, content-first layout
-- Settings: split Codex visibility into rate limits / sessions / menu-bar toggles, added ~/.codex/ as a known data location
+- Fixed menu bar label not showing the Codex percentage alongside Claude — rebuilt as a single AttributedString so MenuBarExtra renders both reliably (Claude in orange, Codex in green)
