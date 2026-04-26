@@ -61,6 +61,10 @@ final class UsageTrackerViewModel: ObservableObject {
 
         setupBindings()
 
+        // Restore last known rate limit from disk so a 429 on launch
+        // doesn't blank the UI.
+        restorePersistedRateLimit()
+
         // Fetch rate limit usage from API
         fetchUsageFromAPI()
 
@@ -68,10 +72,27 @@ final class UsageTrackerViewModel: ObservableObject {
         setupUsageRefreshTimer()
     }
 
+    private static let persistedRateLimitKey = "lastClaudeRateLimitCache"
+
+    private func restorePersistedRateLimit() {
+        guard let data = UserDefaults.standard.data(forKey: Self.persistedRateLimitKey),
+              let cache = try? JSONDecoder().decode(RateLimitCache.self, from: data) else {
+            return
+        }
+        updateRateLimitStatus(from: cache)
+    }
+
+    private func persistRateLimit(_ cache: RateLimitCache) {
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        UserDefaults.standard.set(data, forKey: Self.persistedRateLimitKey)
+    }
+
     private var usageRefreshTimer: Timer?
 
     private func setupUsageRefreshTimer() {
-        usageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        // 2 minutes — the OAuth usage endpoint is rate-limited fairly aggressively,
+        // and the values barely move at sub-minute granularity anyway.
+        usageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.fetchUsageFromAPI()
             }
@@ -105,6 +126,7 @@ final class UsageTrackerViewModel: ObservableObject {
             timestamp: Int(Date().timeIntervalSince1970)
         )
 
+        persistRateLimit(cache)
         updateRateLimitStatus(from: cache)
     }
 
@@ -284,8 +306,8 @@ final class UsageTrackerViewModel: ObservableObject {
     func refresh() {
         isLoading = true
         fileWatcher.refresh()
-        fetchUsageFromAPI()
         UsageAPIService.shared.clearCache()
+        fetchUsageFromAPI()
         isLoading = false
     }
 

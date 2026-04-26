@@ -9,6 +9,11 @@ final class UsageAPIService: @unchecked Sendable {
     private var lastFetch: Date?
     private let cacheDuration: TimeInterval = 60 // Cache for 60 seconds
 
+    // After a 429 we back off this long before talking to the API again,
+    // regardless of how often the caller polls.
+    private var rateLimitedUntil: Date?
+    private let rateLimitBackoff: TimeInterval = 5 * 60
+
     struct UsageResponse: Codable {
         let fiveHour: UsageWindow
         let sevenDay: UsageWindow
@@ -52,6 +57,12 @@ final class UsageAPIService: @unchecked Sendable {
             return cached
         }
 
+        // Honor rate-limit backoff from a previous 429
+        if let until = rateLimitedUntil, Date() < until {
+            if let cached = cachedUsage { return cached }
+            throw UsageAPIError.backoff
+        }
+
         // Get credentials
         guard let token = getAccessToken() else {
             throw UsageAPIError.noCredentials
@@ -72,6 +83,13 @@ final class UsageAPIService: @unchecked Sendable {
 
         guard httpResponse.statusCode == 200 else {
             NSLog("[UsageAPI] Error: HTTP %d", httpResponse.statusCode)
+            if httpResponse.statusCode == 429 {
+                // Respect server-provided Retry-After if present, else default backoff.
+                let retryAfter = (httpResponse.value(forHTTPHeaderField: "Retry-After"))
+                    .flatMap(Double.init) ?? rateLimitBackoff
+                rateLimitedUntil = Date().addingTimeInterval(retryAfter)
+                NSLog("[UsageAPI] 429 — backing off for %.0fs", retryAfter)
+            }
             throw UsageAPIError.httpError(httpResponse.statusCode)
         }
 
@@ -80,6 +98,7 @@ final class UsageAPIService: @unchecked Sendable {
         // Cache result
         cachedUsage = usage
         lastFetch = Date()
+        rateLimitedUntil = nil
 
         NSLog("[UsageAPI] Fetched: 5h=%.1f%%, 7d=%.1f%%", usage.fiveHour.utilization, usage.sevenDay.utilization)
 
@@ -173,10 +192,11 @@ final class UsageAPIService: @unchecked Sendable {
         return credentials.accessToken
     }
 
-    /// Clear cached data
+    /// Clear cached data and reset the 429 backoff so the next call hits the wire.
     func clearCache() {
         cachedUsage = nil
         lastFetch = nil
+        rateLimitedUntil = nil
     }
 }
 
@@ -184,4 +204,5 @@ enum UsageAPIError: Error {
     case noCredentials
     case invalidResponse
     case httpError(Int)
+    case backoff
 }
