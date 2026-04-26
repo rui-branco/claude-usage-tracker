@@ -50,35 +50,43 @@ struct SessionMenuBarLabel: View {
                 let codexVisible = settings.showCodexInMenuBar && state.codexSessionPercent != nil
                 let showResetCountdown = (state.sessionPercent ?? 0) >= 100
                     && state.fiveHourResetAt.map { $0 > currentTime } ?? false
-                    && !codexVisible  // only when Claude is alone
+                    && !codexVisible
 
                 if showResetCountdown, let resetAt = state.fiveHourResetAt {
                     Text(formatTimeUntil(resetAt))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 } else {
-                    HStack(spacing: 3) {
-                        if let claude = state.sessionPercent {
-                            Text("\(claude)%")
-                                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                                .foregroundColor(.orange)
-                        }
-                        if state.sessionPercent != nil && codexVisible {
-                            Text("·")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                        if codexVisible, let codex = state.codexSessionPercent {
-                            Text("\(codex)%")
-                                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                                .foregroundColor(.green)
-                        }
-                    }
+                    Text(buildLabel(claude: state.sessionPercent,
+                                    codex: codexVisible ? state.codexSessionPercent : nil))
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
             }
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
             currentTime = time
         }
+    }
+
+    /// macOS MenuBarExtra labels render most reliably as a single Text — colored
+    /// substrings via AttributedString instead of an HStack of separate Texts.
+    private func buildLabel(claude: Int?, codex: Int?) -> AttributedString {
+        var attr = AttributedString()
+        if let claude = claude {
+            var c = AttributedString("\(claude)%")
+            c.foregroundColor = .orange
+            attr += c
+        }
+        if claude != nil && codex != nil {
+            var sep = AttributedString(" · ")
+            sep.foregroundColor = .secondary
+            attr += sep
+        }
+        if let codex = codex {
+            var x = AttributedString("\(codex)%")
+            x.foregroundColor = .green
+            attr += x
+        }
+        return attr
     }
 
     private func formatTimeUntil(_ date: Date) -> String {
