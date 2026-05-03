@@ -189,7 +189,9 @@ struct RateLimitBar: View {
             Text("\(Int(percent))%")
                 .font(.system(size: 14, weight: .semibold).monospacedDigit())
                 .foregroundColor(color)
-                .frame(width: 38, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(width: 44, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
