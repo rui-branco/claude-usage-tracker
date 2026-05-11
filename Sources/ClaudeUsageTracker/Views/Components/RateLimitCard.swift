@@ -3,12 +3,20 @@ import SwiftUI
 struct RateLimitCard: View {
     let rateLimit: RateLimitStatus?
     var codexLimits: CodexRateLimitStatus? = nil
+    var geminiLimits: GeminiRateLimitStatus? = nil
     @State private var refreshTrigger = Date()
+
+    private var hasMultipleProviders: Bool {
+        let count = (rateLimit != nil ? 1 : 0)
+                  + (codexLimits != nil ? 1 : 0)
+                  + (geminiLimits != nil ? 1 : 0)
+        return count > 1
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if rateLimit == nil && codexLimits != nil {
-                // Codex has data but Claude API is unreachable — make it explicit.
+            if rateLimit == nil && (codexLimits != nil || geminiLimits != nil) {
+                // Other providers have data but Claude API is unreachable — make it explicit.
                 VStack(alignment: .leading, spacing: 4) {
                     SourceLabel(text: "CLAUDE", color: .orange)
                     Text("Anthropic usage API unavailable (rate-limited). Will retry.")
@@ -19,7 +27,7 @@ struct RateLimitCard: View {
             }
 
             if let rateLimit = rateLimit {
-                if codexLimits != nil {
+                if hasMultipleProviders {
                     SourceLabel(text: "CLAUDE", color: .orange)
                 }
 
@@ -68,6 +76,24 @@ struct RateLimitCard: View {
                     tickCount: 7
                 )
             }
+
+            if let gemini = geminiLimits {
+                if rateLimit != nil || codexLimits != nil {
+                    Divider().opacity(0.4)
+                }
+                SourceLabel(text: "GEMINI", color: .blue)
+
+                // One bar per model returned by the quota API. The worst one drives
+                // MenuBarState.geminiSessionPercent (see GeminiService.probeQuota).
+                ForEach(Array(gemini.perModel.enumerated()), id: \.offset) { _, entry in
+                    RateLimitBar(
+                        label: shortGeminiModelName(entry.model),
+                        percent: entry.usedPercent,
+                        resetText: entry.resetAt.map { formatTimeUntil($0) } ?? "—",
+                        tickCount: 0
+                    )
+                }
+            }
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
             refreshTrigger = time
@@ -92,6 +118,27 @@ struct RateLimitCard: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE HH:mm"
         return formatter.string(from: date)
+    }
+
+    /// Trim verbose model IDs like "gemini-2.5-pro-preview-04-29" → "2.5 Pro" for the
+    /// per-model gauge labels. Falls back to the raw id if nothing matches.
+    private func shortGeminiModelName(_ id: String) -> String {
+        let lower = id.lowercased()
+        var version = ""
+        if let match = lower.range(of: #"gemini[- ]?(\d+(?:\.\d+)?)"#, options: .regularExpression) {
+            version = lower[match].replacingOccurrences(of: "gemini", with: "")
+                .replacingOccurrences(of: "-", with: "")
+                .trimmingCharacters(in: .whitespaces)
+        }
+        let tier: String
+        if lower.contains("ultra") { tier = "Ultra" }
+        else if lower.contains("flash") { tier = "Flash" }
+        else if lower.contains("pro") { tier = "Pro" }
+        else if lower.contains("nano") { tier = "Nano" }
+        else { tier = "" }
+
+        let combined = [version, tier].filter { !$0.isEmpty }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return combined.isEmpty ? id : combined
     }
 }
 

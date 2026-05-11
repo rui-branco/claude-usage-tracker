@@ -7,6 +7,7 @@ struct LiveSessionsCard: View {
     var orphanedCount: Int = 0
     var orphanedMemoryMB: Int = 0
     var codexSessions: [CodexLiveSession] = []
+    var geminiSessions: [GeminiLiveSession] = []
     var onKillSession: ((LiveClaudeSession) -> Void)?
     var onKillOrphaned: (() -> Void)?
 
@@ -38,7 +39,7 @@ struct LiveSessionsCard: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(.vertical, 8)
-            } else if sessions.isEmpty && codexSessions.isEmpty {
+            } else if sessions.isEmpty && codexSessions.isEmpty && geminiSessions.isEmpty {
                 HStack {
                     Image(systemName: "moon.zzz")
                         .foregroundColor(.secondary)
@@ -169,6 +170,11 @@ struct LiveSessionsCard: View {
                     CodexInlineRow(session: codex)
                 }
 
+                // Gemini sessions in the same list
+                ForEach(geminiSessions) { gemini in
+                    GeminiInlineRow(session: gemini)
+                }
+
                 // Kill orphaned button
                 if orphanedCount > 0 {
                     Divider()
@@ -226,7 +232,7 @@ struct LiveSessionsCard: View {
     }
 
     private var totalActiveCount: Int {
-        sessions.count + codexSessions.count
+        sessions.count + codexSessions.count + geminiSessions.count
     }
 
     private func formatTokens(_ count: Int) -> String {
@@ -260,6 +266,65 @@ struct CodexInlineRow: View {
                 .padding(.vertical, 1)
                 .background(Color.green.opacity(0.12))
                 .cornerRadius(3)
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 8) {
+                if let tokens = session.totalTokens, tokens > 0 {
+                    Text(formatTokens(tokens))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("—")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.4))
+                }
+                Text("\(session.memoryMB) MB")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+        }
+        .padding(.vertical, 1)
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        switch count {
+        case 0..<1000: return "\(count) tok"
+        case 1000..<1_000_000: return String(format: "%.1fK tok", Double(count) / 1000)
+        default: return String(format: "%.1fM tok", Double(count) / 1_000_000)
+        }
+    }
+}
+
+// Live gemini session row, mirroring the codex row but tagged "gemini".
+struct GeminiInlineRow: View {
+    let session: GeminiLiveSession
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.blue)
+                .frame(width: 5, height: 5)
+
+            Text(session.projectName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+
+            Text("gemini")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.blue.opacity(0.85))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.blue.opacity(0.12))
+                .cornerRadius(3)
+
+            if let model = session.modelName {
+                Text(model)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.6))
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 6)
 

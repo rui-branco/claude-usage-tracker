@@ -40,6 +40,7 @@ struct MenuBarView: View {
     @ObservedObject var viewModel: UsageTrackerViewModel
     @ObservedObject var settings: SettingsService
     @ObservedObject var codexService: CodexService
+    @ObservedObject var geminiService: GeminiService
 
     // Actual measured content height, written by the GeometryReader below.
     @State private var measuredHeight: CGFloat = 0
@@ -65,11 +66,14 @@ struct MenuBarView: View {
             // Content (header removed — popover opens straight into the data)
             ScrollView {
                 VStack(spacing: 16) {
-                    // Rate Limits (Claude + Codex together)
-                    if settings.showRateLimits, viewModel.rateLimitStatus != nil || (settings.showCodexRateLimits && codexService.rateLimits != nil) {
+                    // Rate Limits (Claude + Codex + Gemini together)
+                    if settings.showRateLimits, viewModel.rateLimitStatus != nil
+                        || (settings.showCodexRateLimits && codexService.rateLimits != nil)
+                        || (settings.showGeminiRateLimits && geminiService.rateLimits != nil) {
                         RateLimitCard(
                             rateLimit: viewModel.rateLimitStatus,
-                            codexLimits: settings.showCodexRateLimits ? codexService.rateLimits : nil
+                            codexLimits: settings.showCodexRateLimits ? codexService.rateLimits : nil,
+                            geminiLimits: settings.showGeminiRateLimits ? geminiService.rateLimits : nil
                         )
                     }
 
@@ -86,6 +90,7 @@ struct MenuBarView: View {
                             orphanedCount: viewModel.orphanedSessionCount,
                             orphanedMemoryMB: viewModel.orphanedMemoryMB,
                             codexSessions: settings.showCodexSessions ? codexService.sessions : [],
+                            geminiSessions: settings.showGeminiSessions ? geminiService.sessions : [],
                             onKillSession: { session in
                                 viewModel.killSession(session)
                             },

@@ -229,11 +229,13 @@ struct AppearanceSettingsTab: View {
                 if settings.showMenuBarPercentage {
                     Toggle("Include Codex %", isOn: $settings.showCodexInMenuBar)
                         .padding(.leading, 16)
+                    Toggle("Include Gemini %", isOn: $settings.showGeminiInMenuBar)
+                        .padding(.leading, 16)
                 }
             } header: {
                 Label("Menu Bar", systemImage: "menubar.rectangle")
             } footer: {
-                Text("Claude % is shown in orange, Codex % in green.")
+                Text("Claude % in orange, Codex % in green, Gemini % in blue.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -252,6 +254,17 @@ struct AppearanceSettingsTab: View {
                 Label("Codex", systemImage: "terminal.fill")
             } footer: {
                 Text("Codex data is read from ~/.codex/sessions/ and the local process list.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
+                Toggle("Gemini rate limits", isOn: $settings.showGeminiRateLimits)
+                Toggle("Gemini sessions in list", isOn: $settings.showGeminiSessions)
+            } header: {
+                Label("Gemini", systemImage: "sparkles")
+            } footer: {
+                Text("Gemini quota is fetched from Google's quota API using the OAuth token in ~/.gemini/oauth_creds.json. Sessions are read from ~/.gemini/tmp/.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -315,6 +328,7 @@ struct DataSettingsTab: View {
             Section {
                 DataLocationRow(label: "Claude Data Location", path: "~/.claude/")
                 DataLocationRow(label: "Codex Data Location", path: "~/.codex/")
+                DataLocationRow(label: "Gemini Data Location", path: "~/.gemini/")
             } header: {
                 Label("File Locations", systemImage: "folder")
             }
@@ -419,7 +433,7 @@ struct AboutSettingsTab: View {
                 .padding(.horizontal, 20)
 
                 // Description
-                Text("Track Claude and Codex usage from one menu bar icon — rate limits, live sessions, and percentages at a glance.")
+                Text("Track Claude, Codex, and Gemini usage from one menu bar icon — rate limits, live sessions, and percentages at a glance.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)

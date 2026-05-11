@@ -27,6 +27,15 @@ final class SettingsService: ObservableObject {
     @Published var showCodexInMenuBar: Bool {
         didSet { UserDefaults.standard.set(showCodexInMenuBar, forKey: "showCodexInMenuBar") }
     }
+    @Published var showGeminiRateLimits: Bool {
+        didSet { UserDefaults.standard.set(showGeminiRateLimits, forKey: "showGeminiRateLimits") }
+    }
+    @Published var showGeminiSessions: Bool {
+        didSet { UserDefaults.standard.set(showGeminiSessions, forKey: "showGeminiSessions") }
+    }
+    @Published var showGeminiInMenuBar: Bool {
+        didSet { UserDefaults.standard.set(showGeminiInMenuBar, forKey: "showGeminiInMenuBar") }
+    }
 
     // MARK: - Display Settings
     @Published var showMenuBarPercentage: Bool {
@@ -76,6 +85,9 @@ final class SettingsService: ObservableObject {
             "showCodexRateLimits": true,
             "showCodexSessions": true,
             "showCodexInMenuBar": true,
+            "showGeminiRateLimits": true,
+            "showGeminiSessions": true,
+            "showGeminiInMenuBar": true,
             // Display
             "showMenuBarPercentage": true,
             "compactMode": false,
@@ -110,6 +122,9 @@ final class SettingsService: ObservableObject {
         self.showCodexRateLimits = defaults.bool(forKey: "showCodexRateLimits")
         self.showCodexSessions = defaults.bool(forKey: "showCodexSessions")
         self.showCodexInMenuBar = defaults.bool(forKey: "showCodexInMenuBar")
+        self.showGeminiRateLimits = defaults.bool(forKey: "showGeminiRateLimits")
+        self.showGeminiSessions = defaults.bool(forKey: "showGeminiSessions")
+        self.showGeminiInMenuBar = defaults.bool(forKey: "showGeminiInMenuBar")
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
         self.compactMode = defaults.bool(forKey: "compactMode")
@@ -164,6 +179,9 @@ final class SettingsService: ObservableObject {
         showCodexRateLimits = true
         showCodexSessions = true
         showCodexInMenuBar = true
+        showGeminiRateLimits = true
+        showGeminiSessions = true
+        showGeminiInMenuBar = true
         showMenuBarPercentage = true
         compactMode = false
         notificationsEnabled = true

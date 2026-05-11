@@ -48,16 +48,19 @@ struct SessionMenuBarLabel: View {
 
             if settings.showMenuBarPercentage {
                 let codexVisible = settings.showCodexInMenuBar && state.codexSessionPercent != nil
+                let geminiVisible = settings.showGeminiInMenuBar && state.geminiSessionPercent != nil
                 let showResetCountdown = (state.sessionPercent ?? 0) >= 100
                     && state.fiveHourResetAt.map { $0 > currentTime } ?? false
                     && !codexVisible
+                    && !geminiVisible
 
                 if showResetCountdown, let resetAt = state.fiveHourResetAt {
                     Text(formatTimeUntil(resetAt))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 } else {
                     Text(buildLabel(claude: state.sessionPercent,
-                                    codex: codexVisible ? state.codexSessionPercent : nil))
+                                    codex: codexVisible ? state.codexSessionPercent : nil,
+                                    gemini: geminiVisible ? state.geminiSessionPercent : nil))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
             }
@@ -69,22 +72,36 @@ struct SessionMenuBarLabel: View {
 
     /// macOS MenuBarExtra labels render most reliably as a single Text — colored
     /// substrings via AttributedString instead of an HStack of separate Texts.
-    private func buildLabel(claude: Int?, codex: Int?) -> AttributedString {
+    private func buildLabel(claude: Int?, codex: Int?, gemini: Int?) -> AttributedString {
         var attr = AttributedString()
+        var firstWritten = false
+
         if let claude = claude {
             var c = AttributedString("\(claude)%")
             c.foregroundColor = .orange
             attr += c
-        }
-        if claude != nil && codex != nil {
-            var sep = AttributedString(" · ")
-            sep.foregroundColor = .secondary
-            attr += sep
+            firstWritten = true
         }
         if let codex = codex {
+            if firstWritten {
+                var sep = AttributedString(" · ")
+                sep.foregroundColor = .secondary
+                attr += sep
+            }
             var x = AttributedString("\(codex)%")
             x.foregroundColor = .green
             attr += x
+            firstWritten = true
+        }
+        if let gemini = gemini {
+            if firstWritten {
+                var sep = AttributedString(" · ")
+                sep.foregroundColor = .secondary
+                attr += sep
+            }
+            var g = AttributedString("\(gemini)%")
+            g.foregroundColor = .blue
+            attr += g
         }
         return attr
     }
@@ -108,6 +125,7 @@ class MenuBarState: ObservableObject {
     @Published var sessionPercent: Int?
     @Published var fiveHourResetAt: Date?
     @Published var codexSessionPercent: Int?
+    @Published var geminiSessionPercent: Int?
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -180,7 +198,8 @@ struct AppContentView: View {
                 MenuBarView(
                     viewModel: appState.viewModel!,
                     settings: appState.settings,
-                    codexService: appState.codexService!
+                    codexService: appState.codexService!,
+                    geminiService: appState.geminiService!
                 )
             } else {
                 VStack {
@@ -201,6 +220,7 @@ class AppState: ObservableObject {
     @Published var isLoaded = false
     @Published var viewModel: UsageTrackerViewModel?
     @Published var codexService: CodexService?
+    @Published var geminiService: GeminiService?
     let settings = SettingsService.shared
 
     private var fileWatcher: FileWatcherService?
@@ -213,15 +233,18 @@ class AppState: ObservableObject {
         let fw = FileWatcherService()
         let pm = ProcessMonitorService()
         let codex = CodexService()
+        let gemini = GeminiService()
 
         fileWatcher = fw
         processMonitor = pm
         codexService = codex
+        geminiService = gemini
 
         // Start services
         fw.start()
         pm.startMonitoring()
         codex.start()
+        gemini.start()
 
         // Create view model
         viewModel = UsageTrackerViewModel(fileWatcher: fw, processMonitor: pm)
