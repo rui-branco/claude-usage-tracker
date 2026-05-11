@@ -22,7 +22,11 @@ let package = Package(
             exclude: ["Secrets.swift.example"],
             resources: [
                 .copy("Resources/claude-menu-icon.png"),
-                .copy("Resources/claude-icon.png")
+                .copy("Resources/claude-icon.png"),
+                .copy("Resources/codex-icon.png"),
+                .copy("Resources/gemini-icon.png"),
+                .copy("Resources/AppIcon.png"),
+                .copy("Resources/AppIcon.icns")
             ]
         )
     ]

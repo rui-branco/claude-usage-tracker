@@ -23,6 +23,11 @@ final class GeminiService: ObservableObject {
     private var credsURL: URL { geminiRoot.appendingPathComponent("oauth_creds.json") }
     private var projectsFileURL: URL { geminiRoot.appendingPathComponent("projects.json") }
 
+    /// GCP project id to send with the quota POST. Without it the endpoint returns
+    /// placeholder fractions; with it we get real per-model usage. Cached on first
+    /// successful discovery via cloudresourcemanager.googleapis.com.
+    private var cachedProjectId: String?
+
     func start() {
         Task { await scan() }
         Task { await probeQuota() }
@@ -74,9 +79,12 @@ final class GeminiService: ObservableObject {
 
     private func probeQuota() async {
         let creds = credsURL
-        let fetched = await Task.detached(priority: .utility) {
-            GeminiService.fetchQuotaSync(credsURL: creds)
+        let cachedProject = cachedProjectId
+        let result = await Task.detached(priority: .utility) {
+            GeminiService.fetchQuotaSync(credsURL: creds, projectId: cachedProject)
         }.value
+        let fetched = result.status
+        if let discovered = result.projectId { self.cachedProjectId = discovered }
 
         if let fetched = fetched {
             self.rateLimits = fetched
@@ -305,7 +313,7 @@ final class GeminiService: ObservableObject {
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let lineData = raw.data(using: .utf8) else { continue }
             if let turn = try? decoder.decode(GeminiSessionTurn.self, from: lineData) {
-                if let t = turn.tokens?.total { latestTotal = t }
+                if let t = turn.tokens?.total { latestTotal = (latestTotal ?? 0) + t }
                 if let m = turn.model, !m.isEmpty { latestModel = m }
             }
         }
@@ -314,26 +322,53 @@ final class GeminiService: ObservableObject {
 
     // MARK: - Quota API (sync helper running on a background queue)
 
-    nonisolated private static func fetchQuotaSync(credsURL: URL) -> GeminiRateLimitStatus? {
+    nonisolated private struct QuotaResult {
+        let status: GeminiRateLimitStatus?
+        /// Newly-discovered project ID, if we had to look one up this call.
+        let projectId: String?
+    }
+
+    nonisolated private static func fetchQuotaSync(credsURL: URL, projectId: String?) -> QuotaResult {
         guard FileManager.default.fileExists(atPath: credsURL.path),
               let credData = try? Data(contentsOf: credsURL),
               let creds = try? JSONDecoder().decode(GeminiOAuthCreds.self, from: credData),
-              let token = creds.accessToken, !token.isEmpty else { return nil }
+              let token = creds.accessToken, !token.isEmpty else { return QuotaResult(status: nil, projectId: nil) }
 
         // Skip when the token has clearly expired — avoid a guaranteed 401.
         if let expiryMs = creds.expiryDate {
             let expiry = Date(timeIntervalSince1970: expiryMs / 1000)
-            if expiry < Date() { return nil }
+            if expiry < Date() { return QuotaResult(status: nil, projectId: nil) }
         }
 
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else { return nil }
+        // Discover a GCP project on first call. Without one, the quota endpoint
+        // returns placeholder fractions (1.0 across the board); with one, real per-model usage.
+        var discoveredProject: String?
+        let activeProject: String?
+        if let projectId = projectId {
+            activeProject = projectId
+        } else if let found = listFirstActiveProject(token: token) {
+            discoveredProject = found
+            activeProject = found
+        } else {
+            activeProject = nil
+        }
+
+        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
+            return QuotaResult(status: nil, projectId: discoveredProject)
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data("{}".utf8)
+        if let activeProject = activeProject {
+            // JSON-encode to handle any unusual characters in the project ID safely.
+            let body: [String: String] = ["project": activeProject]
+            request.httpBody = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
+        } else {
+            request.httpBody = Data("{}".utf8)
+        }
 
         let semaphore = DispatchSemaphore(value: 0)
         var responseData: Data?
@@ -349,7 +384,9 @@ final class GeminiService: ObservableObject {
 
         guard responseCode == 200, let data = responseData,
               let decoded = try? JSONDecoder().decode(GeminiQuotaResponse.self, from: data),
-              let buckets = decoded.buckets, !buckets.isEmpty else { return nil }
+              let buckets = decoded.buckets, !buckets.isEmpty else {
+            return QuotaResult(status: nil, projectId: discoveredProject)
+        }
 
         // Collapse to one entry per model: keep the bucket with the LOWEST remaining fraction
         // (= the worst-case constraint for that model).
@@ -362,26 +399,91 @@ final class GeminiService: ObservableObject {
                 byModel[model] = (fraction, bucket.resetTime)
             }
         }
-        guard !byModel.isEmpty else { return nil }
+        guard !byModel.isEmpty else { return QuotaResult(status: nil, projectId: discoveredProject) }
 
-        let perModel: [(model: String, usedPercent: Double, resetAt: Date?)] = byModel
+        let perModelAll: [(model: String, usedPercent: Double, resetAt: Date?, resetKey: String)] = byModel
             .sorted { $0.key < $1.key }
             .map { entry in
                 (model: entry.key,
                  usedPercent: max(0, min(100, (1.0 - entry.value.fraction) * 100)),
-                 resetAt: entry.value.resetTime.flatMap(parseISODate))
+                 resetAt: entry.value.resetTime.flatMap(parseISODate),
+                 resetKey: entry.value.resetTime ?? "")
             }
+
+        // Models that share a quota pool return identical (usedPercent, resetTime). Group
+        // by that signature and keep the newest variant — preview models sort after stable
+        // ones lexicographically ("2.5-pro" < "3-pro-preview" < "3.1-pro-preview"), so the
+        // last-sorted name in each pool is the one to show.
+        var pooled: [String: (model: String, usedPercent: Double, resetAt: Date?)] = [:]
+        for entry in perModelAll {
+            let signature = "\(Int(entry.usedPercent.rounded()))|\(entry.resetKey)"
+            let candidate = (model: entry.model, usedPercent: entry.usedPercent, resetAt: entry.resetAt)
+            if let existing = pooled[signature] {
+                if entry.model > existing.model { pooled[signature] = candidate }
+            } else {
+                pooled[signature] = candidate
+            }
+        }
+        let deduped = pooled.values.sorted { $0.model < $1.model }
+
+        // Only show models the user has actually hit (display rounds to 0% below 0.5%).
+        // Fall back to the worst pool overall if nothing is used so the section never disappears.
+        let used = deduped.filter { $0.usedPercent >= 0.5 }
+        let perModel: [(model: String, usedPercent: Double, resetAt: Date?)]
+        if used.isEmpty {
+            perModel = deduped.max(by: { $0.usedPercent < $1.usedPercent }).map { [$0] } ?? []
+        } else {
+            perModel = used
+        }
 
         // Most-pressured model drives the menu bar gauge.
         let worst = perModel.max(by: { $0.usedPercent < $1.usedPercent }) ?? perModel.first!
 
-        return GeminiRateLimitStatus(
+        let status = GeminiRateLimitStatus(
             model: worst.model,
             usedPercent: worst.usedPercent,
             resetAt: worst.resetAt,
             updatedAt: Date(),
             perModel: perModel
         )
+        return QuotaResult(status: status, projectId: discoveredProject)
+    }
+
+    // MARK: - GCP project discovery
+
+    nonisolated private struct CloudProjectsResponse: Decodable {
+        let projects: [CloudProject]?
+    }
+    nonisolated private struct CloudProject: Decodable {
+        let projectId: String?
+        let lifecycleState: String?
+    }
+
+    /// Fetches the first ACTIVE GCP project the user has access to. Empirically every
+    /// project returns the same quota numbers (quota is per-user, not per-project),
+    /// so picking any active one is fine.
+    nonisolated private static func listFirstActiveProject(token: String) -> String? {
+        guard let url = URL(string: "https://cloudresourcemanager.googleapis.com/v1/projects") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var responseData: Data?
+        var responseCode: Int = 0
+        let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            responseData = data
+            if let http = response as? HTTPURLResponse { responseCode = http.statusCode }
+            semaphore.signal()
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + 12)
+
+        guard responseCode == 200, let data = responseData,
+              let decoded = try? JSONDecoder().decode(CloudProjectsResponse.self, from: data) else { return nil }
+        return decoded.projects?
+            .first(where: { ($0.lifecycleState ?? "").uppercased() == "ACTIVE" && !($0.projectId ?? "").isEmpty })?
+            .projectId
     }
 
     nonisolated private static func parseISODate(_ value: String) -> Date? {

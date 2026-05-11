@@ -25,6 +25,9 @@ struct GeminiQuotaBucket: Decodable {
     let resetTime: String?
     let modelId: String?
     let tokenType: String?
+    /// Sent only on paid Code Assist plans when a project ID is included. Absolute
+    /// number of remaining requests (string-encoded int).
+    let remainingAmount: String?
 }
 
 // MARK: - Session JSONL header (~/.gemini/tmp/<project>/chats/session-*.jsonl)

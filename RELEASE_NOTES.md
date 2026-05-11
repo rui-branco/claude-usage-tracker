@@ -1,10 +1,7 @@
-### Gemini support
+### Gemini polish
 
-- Track Gemini CLI usage alongside Claude and Codex in the same menu bar icon
-- Real rate-limit gauge per model, fetched from Google's quota API using the OAuth token in `~/.gemini/oauth_creds.json`
-- Gemini % shown in **blue** in the menu bar label, next to Claude (orange) and Codex (green)
-- Live Gemini sessions surfaced in the same list as Claude/Codex (project, model, token total, memory)
-- Sessions read from `~/.gemini/tmp/<project>/chats/session-*.jsonl`
-- New Settings toggles: "Include Gemini %" (menu bar) and Gemini rate-limits / sessions visibility
-
-Gemini's quotas reset daily (per model), unlike Claude's 5h+weekly or Codex's primary+weekly windows — that's expected, the API only exposes daily buckets.
+- Real per-model Gemini quota: the app now sends a GCP project ID with the quota request so Google returns actual usage instead of placeholder fractions (previously stuck at 0% even with active usage)
+- Hides model bars at 0% to remove noise — only models you've actually hit are shown
+- Deduplicates pooled models: `gemini-2.5-pro`, `gemini-3-pro-preview`, and `gemini-3.1-pro-preview` share the same quota pool, now collapsed into one bar labelled with the newest variant
+- Reset display switched from countdown (`23h 22m`) to clock time (`TMR 21:36`) — much easier to read for daily-reset quotas
+- Real brand logos (Claude / Codex / Gemini) replace the colored dots in the Rate Limits header and the Live Sessions rows

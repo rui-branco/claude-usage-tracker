@@ -105,9 +105,7 @@ struct LiveSessionsCard: View {
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 8) {
-                                Circle()
-                                    .fill(Color.secondary.opacity(0.5))
-                                    .frame(width: 5, height: 5)
+                                ProviderBrandIcon(asset: "claude-icon", size: 11)
 
                                 Text(session.projectName)
                                     .font(.system(size: 11, weight: .medium))
@@ -250,9 +248,7 @@ struct CodexInlineRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(Color.green)
-                .frame(width: 5, height: 5)
+            ProviderBrandIcon(asset: "codex-icon", size: 11)
 
             Text(session.projectName)
                 .font(.system(size: 11, weight: .medium))
@@ -302,9 +298,7 @@ struct GeminiInlineRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(Color.blue)
-                .frame(width: 5, height: 5)
+            ProviderBrandIcon(asset: "gemini-icon", size: 11)
 
             Text(session.projectName)
                 .font(.system(size: 11, weight: .medium))

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct RateLimitCard: View {
     let rateLimit: RateLimitStatus?
@@ -18,7 +19,7 @@ struct RateLimitCard: View {
             if rateLimit == nil && (codexLimits != nil || geminiLimits != nil) {
                 // Other providers have data but Claude API is unreachable — make it explicit.
                 VStack(alignment: .leading, spacing: 4) {
-                    SourceLabel(text: "CLAUDE", color: .orange)
+                    SourceLabel(text: "CLAUDE", color: .orange, iconAsset: "claude-icon")
                     Text("Anthropic usage API unavailable (rate-limited). Will retry.")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
@@ -28,7 +29,7 @@ struct RateLimitCard: View {
 
             if let rateLimit = rateLimit {
                 if hasMultipleProviders {
-                    SourceLabel(text: "CLAUDE", color: .orange)
+                    SourceLabel(text: "CLAUDE", color: .orange, iconAsset: "claude-icon")
                 }
 
                 RateLimitBar(
@@ -58,7 +59,7 @@ struct RateLimitCard: View {
                 if rateLimit != nil {
                     Divider().opacity(0.4)
                 }
-                SourceLabel(text: "CODEX\(codex.planType.isEmpty ? "" : " · \(codex.planType.uppercased())")", color: .green)
+                SourceLabel(text: "CODEX\(codex.planType.isEmpty ? "" : " · \(codex.planType.uppercased())")", color: .green, iconAsset: "codex-icon")
 
                 // When the saved reset has elapsed the window has rolled over —
                 // show the bar at 0% rather than carrying the stale percentage.
@@ -81,7 +82,7 @@ struct RateLimitCard: View {
                 if rateLimit != nil || codexLimits != nil {
                     Divider().opacity(0.4)
                 }
-                SourceLabel(text: "GEMINI", color: .blue)
+                SourceLabel(text: "GEMINI", color: .blue, iconAsset: "gemini-icon")
 
                 // One bar per model returned by the quota API. The worst one drives
                 // MenuBarState.geminiSessionPercent (see GeminiService.probeQuota).
@@ -89,7 +90,7 @@ struct RateLimitCard: View {
                     RateLimitBar(
                         label: shortGeminiModelName(entry.model),
                         percent: entry.usedPercent,
-                        resetText: entry.resetAt.map { formatTimeUntil($0) } ?? "—",
+                        resetText: entry.resetAt.map { formatGeminiResetClock($0) } ?? "—",
                         tickCount: 0
                     )
                 }
@@ -120,25 +121,37 @@ struct RateLimitCard: View {
         return formatter.string(from: date)
     }
 
-    /// Trim verbose model IDs like "gemini-2.5-pro-preview-04-29" → "2.5 Pro" for the
-    /// per-model gauge labels. Falls back to the raw id if nothing matches.
-    private func shortGeminiModelName(_ id: String) -> String {
-        let lower = id.lowercased()
-        var version = ""
-        if let match = lower.range(of: #"gemini[- ]?(\d+(?:\.\d+)?)"#, options: .regularExpression) {
-            version = lower[match].replacingOccurrences(of: "gemini", with: "")
-                .replacingOccurrences(of: "-", with: "")
-                .trimmingCharacters(in: .whitespaces)
+    /// Gemini's quota always resets in ~24h, so a "RESETS 23H 22M" countdown is just
+    /// visual noise. Show the actual clock time the reset will happen, with a TMR/TODAY
+    /// hint when the reset crosses local midnight.
+    private func formatGeminiResetClock(_ date: Date) -> String {
+        let now = Date()
+        let calendar = Calendar.current
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+        let time = timeFmt.string(from: date)
+        if calendar.isDateInToday(date) { return "TODAY \(time)" }
+        if calendar.isDateInTomorrow(date) { return "TMR \(time)" }
+        if date < now.addingTimeInterval(7 * 86400) {
+            let dayFmt = DateFormatter()
+            dayFmt.dateFormat = "EEE"
+            return "\(dayFmt.string(from: date)) \(time)"
         }
-        let tier: String
-        if lower.contains("ultra") { tier = "Ultra" }
-        else if lower.contains("flash") { tier = "Flash" }
-        else if lower.contains("pro") { tier = "Pro" }
-        else if lower.contains("nano") { tier = "Nano" }
-        else { tier = "" }
+        let fallback = DateFormatter()
+        fallback.dateFormat = "MMM d HH:mm"
+        return fallback.string(from: date)
+    }
 
-        let combined = [version, tier].filter { !$0.isEmpty }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        return combined.isEmpty ? id : combined
+    /// Strip the redundant "gemini-" prefix; otherwise show the raw modelId so users
+    /// can tell which bucket each bar represents (e.g. preview vs stable variants).
+    private func shortGeminiModelName(_ id: String) -> String {
+        var trimmed = id
+        if trimmed.lowercased().hasPrefix("gemini-") {
+            trimmed = String(trimmed.dropFirst("gemini-".count))
+        } else if trimmed.lowercased().hasPrefix("gemini ") {
+            trimmed = String(trimmed.dropFirst("gemini ".count))
+        }
+        return trimmed
     }
 }
 
@@ -170,21 +183,52 @@ struct StaleBarPlaceholder: View {
     }
 }
 
-// Small uppercase tag identifying the source (Claude / Codex) inside a shared card.
+// Small uppercase tag identifying the source (Claude / Codex / Gemini) inside a shared card.
 struct SourceLabel: View {
     let text: String
     let color: Color
+    var iconAsset: String? = nil
 
     var body: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
+            if let asset = iconAsset {
+                ProviderBrandIcon(asset: asset, size: 12)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+            }
             Text(text)
                 .font(.system(size: 9, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(.secondary)
             Spacer()
+        }
+    }
+}
+
+/// Brand logo loaded from `Resources/<asset>.png`. Falls back to a circle
+/// if the asset is missing so the layout never breaks.
+struct ProviderBrandIcon: View {
+    let asset: String
+    var size: CGFloat = 12
+
+    var body: some View {
+        if let url = ResourceLoader.url(forResource: asset, withExtension: "png"),
+           let nsImage = NSImage(contentsOf: url) {
+            nsImage.size = NSSize(width: size, height: size)
+            return AnyView(
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size, height: size)
+            )
+        } else {
+            return AnyView(
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: size * 0.5, height: size * 0.5)
+            )
         }
     }
 }
