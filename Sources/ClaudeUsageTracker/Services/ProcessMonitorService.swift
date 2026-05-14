@@ -22,6 +22,9 @@ final class ProcessMonitorService: ObservableObject {
     @Published var isLoading = true
 
     private var timer: Timer?
+    private let activeScanInterval: TimeInterval = 5.0
+    private let idleScanInterval: TimeInterval = 30.0
+    private var isPopoverVisible: Bool = false
 
     init() {}
 
@@ -30,10 +33,24 @@ final class ProcessMonitorService: ObservableObject {
         Task {
             await scanInBackground()
         }
+        scheduleTimer()
+    }
 
-        // Scan every 5 seconds
-        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
+    /// Slows the process scanner when the popover is hidden — the live
+    /// sessions list is invisible to the user there, so 30s is plenty.
+    /// Fires an immediate scan on re-open; the popover may briefly show the
+    /// previous list while it runs.
+    func setPopoverVisible(_ visible: Bool) {
+        guard isPopoverVisible != visible else { return }
+        isPopoverVisible = visible
+        scheduleTimer()
+        if visible { Task { await scanInBackground() } }
+    }
+
+    private func scheduleTimer() {
+        timer?.invalidate()
+        let interval = isPopoverVisible ? activeScanInterval : idleScanInterval
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.scanInBackground()
             }
@@ -125,34 +142,7 @@ final class ProcessMonitorService: ObservableObject {
     }
 
     nonisolated private static func getWorkingDirectory(for pid: Int32) -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-p", "\(pid)", "-Fn"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-
-        do {
-            try task.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-
-            guard let output = String(data: data, encoding: .utf8) else { return "" }
-
-            // Parse lsof output - look for 'cwd' followed by path
-            let lines = output.components(separatedBy: "\n")
-            var foundCwd = false
-            for line in lines {
-                if line == "fcwd" {
-                    foundCwd = true
-                } else if foundCwd && line.hasPrefix("n") {
-                    return String(line.dropFirst()) // Remove 'n' prefix
-                }
-            }
-        } catch {}
-
-        return ""
+        ProcCwd.of(pid: pid) ?? ""
     }
 
     func stopMonitoring() {

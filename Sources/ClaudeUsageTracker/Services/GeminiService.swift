@@ -10,11 +10,24 @@ final class GeminiService: ObservableObject {
 
     private var timer: Timer?
     private var quotaTimer: Timer?
-    private let scanInterval: TimeInterval = 5
+    private let activeScanInterval: TimeInterval = 5
+    private let idleScanInterval: TimeInterval = 30
+    private var isPopoverVisible: Bool = false
     /// Quota POST is more expensive — poll it less aggressively than session scan.
     private let quotaInterval: TimeInterval = 60
     private let sessionLookbackMinutes: Int = 60
     private let maxFileSize: Int = 10 * 1024 * 1024
+
+    /// Memoized parsed session JSONL keyed by file path, invalidated on
+    /// (mtime, size) change. Skipping re-parse of unchanged files is the
+    /// dominant CPU saving across rapid timer ticks.
+    private var sessionCache: [String: CachedSession] = [:]
+
+    nonisolated private struct CachedSession {
+        let mtime: Date
+        let size: Int
+        let parsed: ParsedSession
+    }
 
     private var geminiRoot: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini")
@@ -31,11 +44,7 @@ final class GeminiService: ObservableObject {
     func start() {
         Task { await scan() }
         Task { await probeQuota() }
-        timer = Timer.scheduledTimer(withTimeInterval: scanInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.scan()
-            }
-        }
+        scheduleScanTimer()
         quotaTimer = Timer.scheduledTimer(withTimeInterval: quotaInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.probeQuota()
@@ -53,6 +62,27 @@ final class GeminiService: ObservableObject {
         Task { await probeQuota() }
     }
 
+    /// Called from the menu-bar popover lifecycle. Slows the session scanner
+    /// to 30s when the user can't see the data. The quota timer is already
+    /// at 60s — and it (not scan) is what publishes the menu-bar Gemini % —
+    /// so the visible label is unaffected by this throttle.
+    func setPopoverVisible(_ visible: Bool) {
+        guard isPopoverVisible != visible else { return }
+        isPopoverVisible = visible
+        scheduleScanTimer()
+        if visible { Task { await scan() } }
+    }
+
+    private func scheduleScanTimer() {
+        timer?.invalidate()
+        let interval = isPopoverVisible ? activeScanInterval : idleScanInterval
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.scan()
+            }
+        }
+    }
+
     // MARK: - Session scan (off-main)
 
     private func scan() async {
@@ -61,17 +91,20 @@ final class GeminiService: ObservableObject {
         let installed = FileManager.default.fileExists(atPath: geminiRoot.path)
         self.hasGeminiInstalled = installed
 
-        let sessions = await Task.detached(priority: .utility) { [lookback = sessionLookbackMinutes, cap = maxFileSize] in
+        let cacheSnapshot = sessionCache
+        let result = await Task.detached(priority: .utility) { [lookback = sessionLookbackMinutes, cap = maxFileSize] in
             GeminiService.scanCurrent(
                 tmpRoot: root,
                 projectsURL: projectsURL,
                 lookbackMinutes: lookback,
                 maxFileSize: cap,
-                installed: installed
+                installed: installed,
+                cache: cacheSnapshot
             )
         }.value
 
-        self.sessions = sessions
+        self.sessionCache = result.updatedCache
+        self.sessions = result.sessions
         self.isLoading = false
     }
 
@@ -102,18 +135,24 @@ final class GeminiService: ObservableObject {
 
     // MARK: - Heavy lifting
 
+    nonisolated private struct ScanResult {
+        let sessions: [GeminiLiveSession]
+        let updatedCache: [String: CachedSession]
+    }
+
     nonisolated private static func scanCurrent(
         tmpRoot: URL,
         projectsURL: URL,
         lookbackMinutes: Int,
         maxFileSize: Int,
-        installed: Bool
-    ) -> [GeminiLiveSession] {
+        installed: Bool,
+        cache: [String: CachedSession]
+    ) -> ScanResult {
         // 1. Detect running gemini processes
         let processes = listGeminiProcesses()
         guard installed else {
             // Even with no ~/.gemini, surface bare process info
-            return processes.map { proc in
+            let bare = processes.map { proc in
                 GeminiLiveSession(
                     id: "\(proc.pid)",
                     pid: proc.pid,
@@ -124,14 +163,17 @@ final class GeminiService: ObservableObject {
                     modelName: nil
                 )
             }
+            return ScanResult(sessions: bare, updatedCache: [:])
         }
 
         // 2. Build cwd -> project shortname map from projects.json
         let projectMap = loadProjectMap(projectsURL)
 
-        // 3. Index recent session files by project shortname, keep newest per project
+        // 3. Index recent session files by project shortname, keep newest per project.
+        //    Reuse cached parse results when (mtime, size) is unchanged.
         let cutoff = Date().addingTimeInterval(-Double(lookbackMinutes) * 60)
         var rolloutsByProject: [String: (mtime: Date, totalTokens: Int?, modelName: String?)] = [:]
+        var nextCache: [String: CachedSession] = [:]
         if let projects = try? FileManager.default.contentsOfDirectory(at: tmpRoot, includingPropertiesForKeys: nil) {
             for projDir in projects {
                 let chatsDir = projDir.appendingPathComponent("chats")
@@ -148,7 +190,15 @@ final class GeminiService: ObservableObject {
                           mtime >= cutoff,
                           size <= maxFileSize else { continue }
 
-                    let parsed = parseSession(url)
+                    let cacheKey = url.path
+                    let parsed: ParsedSession
+                    if let cached = cache[cacheKey], cached.size == size, cached.mtime == mtime {
+                        parsed = cached.parsed
+                    } else {
+                        parsed = parseSession(url)
+                    }
+                    nextCache[cacheKey] = CachedSession(mtime: mtime, size: size, parsed: parsed)
+
                     let key = projDir.lastPathComponent
                     let entry = (mtime: mtime, totalTokens: parsed.totalTokens, modelName: parsed.modelName)
                     if let existing = rolloutsByProject[key] {
@@ -193,7 +243,8 @@ final class GeminiService: ObservableObject {
             }
         }
 
-        return Array(byCwd.values).sorted { $0.memoryMB > $1.memoryMB }
+        let sessions = Array(byCwd.values).sorted { $0.memoryMB > $1.memoryMB }
+        return ScanResult(sessions: sessions, updatedCache: nextCache)
     }
 
     nonisolated private static func loadProjectMap(_ url: URL) -> [String: String] {
@@ -271,26 +322,7 @@ final class GeminiService: ObservableObject {
     }
 
     nonisolated private static func workingDirectory(for pid: Int32) -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-p", "\(pid)", "-Fn"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-
-        do {
-            try task.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            guard let output = String(data: data, encoding: .utf8) else { return "" }
-            var foundCwd = false
-            for line in output.components(separatedBy: "\n") {
-                if line == "fcwd" { foundCwd = true }
-                else if foundCwd && line.hasPrefix("n") { return String(line.dropFirst()) }
-            }
-        } catch {}
-        return ""
+        ProcCwd.of(pid: pid) ?? ""
     }
 
     // MARK: - Session JSONL parser

@@ -210,6 +210,13 @@ struct AppContentView: View {
                 .frame(width: 200, height: 100)
             }
         }
+        // AppContentView is only materialized inside the MenuBarExtra
+        // content closure, so its appear/disappear hooks act as a pragmatic
+        // proxy for popover open/close. SwiftUI may re-create the view in
+        // edge cases, but the worst outcome is an extra scan or a missed
+        // throttle window — the scanners themselves stay correct.
+        .onAppear { appState.setPopoverVisible(true) }
+        .onDisappear { appState.setPopoverVisible(false) }
     }
 }
 
@@ -251,5 +258,15 @@ class AppState: ObservableObject {
 
         // Mark as loaded
         isLoaded = true
+    }
+
+    /// Propagate popover state so scanners that do not drive visible menu-bar
+    /// data (ProcessMonitor, Gemini) can back off to 30s while hidden. Codex's
+    /// scanner stays on 5s because it publishes the menu-bar % directly — its
+    /// setPopoverVisible only triggers an extra refresh on open.
+    func setPopoverVisible(_ visible: Bool) {
+        processMonitor?.setPopoverVisible(visible)
+        codexService?.setPopoverVisible(visible)
+        geminiService?.setPopoverVisible(visible)
     }
 }

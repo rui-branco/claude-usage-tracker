@@ -9,9 +9,26 @@ final class CodexService: ObservableObject {
     @Published var hasCodexInstalled: Bool = false
 
     private var timer: Timer?
+    /// Codex's scan() is the only writer of MenuBarState.codexSessionPercent,
+    /// and that label is visible whenever showCodexInMenuBar is on — even
+    /// while the popover is closed. So we keep a single 5s cadence rather
+    /// than throttling by popover visibility; the JSONL parse cache and
+    /// libproc cwd lookup make each tick cheap enough that the energy win
+    /// from caching alone is sufficient.
     private let scanInterval: TimeInterval = 5
     private let rolloutLookbackDays: Int = 2
     private let maxFileSize: Int = 10 * 1024 * 1024
+
+    /// Memoized parsed rollouts keyed by file path. Invalidated when (mtime, size)
+    /// changes — unchanged files are reused, which is the dominant win since the
+    /// 2-day lookback set rarely changes file-to-file between 5s ticks.
+    private var rolloutCache: [String: CachedRollout] = [:]
+
+    nonisolated private struct CachedRollout {
+        let mtime: Date
+        let size: Int
+        let parsed: ParsedRollout
+    }
 
     private var sessionsRoot: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
@@ -35,15 +52,30 @@ final class CodexService: ObservableObject {
         Task { await scan() }
     }
 
+    /// Triggers an extra refresh when the popover opens so the live-sessions
+    /// list renders with fresh data immediately. Cadence is unchanged — see
+    /// the `scanInterval` comment for why Codex does not throttle.
+    func setPopoverVisible(_ visible: Bool) {
+        if visible { Task { await scan() } }
+    }
+
     private func scan() async {
         let root = sessionsRoot
         let installed = FileManager.default.fileExists(atPath: root.path)
         self.hasCodexInstalled = installed
 
+        let cacheSnapshot = rolloutCache
         let result = await Task.detached(priority: .utility) { [lookbackDays = rolloutLookbackDays, capBytes = maxFileSize] in
-            CodexService.scanCurrent(sessionsRoot: root, lookbackDays: lookbackDays, maxFileSize: capBytes, installed: installed)
+            CodexService.scanCurrent(
+                sessionsRoot: root,
+                lookbackDays: lookbackDays,
+                maxFileSize: capBytes,
+                installed: installed,
+                cache: cacheSnapshot
+            )
         }.value
 
+        self.rolloutCache = result.updatedCache
         self.sessions = result.sessions
         // Keep last known rate limits if this scan didn't find newer ones
         if let limits = result.rateLimits {
@@ -63,9 +95,16 @@ final class CodexService: ObservableObject {
     private struct ScanResult {
         let sessions: [CodexLiveSession]
         let rateLimits: CodexRateLimitStatus?
+        let updatedCache: [String: CachedRollout]
     }
 
-    nonisolated private static func scanCurrent(sessionsRoot: URL, lookbackDays: Int, maxFileSize: Int, installed: Bool) -> ScanResult {
+    nonisolated private static func scanCurrent(
+        sessionsRoot: URL,
+        lookbackDays: Int,
+        maxFileSize: Int,
+        installed: Bool,
+        cache: [String: CachedRollout]
+    ) -> ScanResult {
         // 1. Find currently running codex processes
         let processes = listCodexProcesses()
 
@@ -73,10 +112,12 @@ final class CodexService: ObservableObject {
         let cutoff = Date().addingTimeInterval(-Double(lookbackDays) * 86400)
         let rolloutFiles = installed ? recentJsonlFiles(in: sessionsRoot, modifiedAfter: cutoff) : []
 
-        // 3. Scan rollouts ONCE: pick most recent rate_limits + index by cwd / session id
+        // 3. Scan rollouts ONCE: pick most recent rate_limits + index by cwd / session id.
+        //    Reuse cached parse results when (mtime, size) is unchanged.
         var newestRateLimits: (date: Date, status: CodexRateLimitStatus)?
         var rolloutsByCwd: [String: (mtime: Date, totalTokens: Int?)] = [:]
         var rolloutsBySessionId: [String: (mtime: Date, totalTokens: Int?)] = [:]
+        var nextCache: [String: CachedRollout] = [:]
 
         for url in rolloutFiles {
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -84,7 +125,16 @@ final class CodexService: ObservableObject {
                   let size = attrs[.size] as? Int,
                   size <= maxFileSize else { continue }
 
-            guard let parsed = parseRollout(url) else { continue }
+            let key = url.path
+            let parsed: ParsedRollout
+            if let cached = cache[key], cached.size == size, cached.mtime == mtime {
+                parsed = cached.parsed
+            } else if let fresh = parseRollout(url) {
+                parsed = fresh
+            } else {
+                continue
+            }
+            nextCache[key] = CachedRollout(mtime: mtime, size: size, parsed: parsed)
 
             if let rl = parsed.rateLimitsAt {
                 if newestRateLimits == nil || rl.date > newestRateLimits!.date {
@@ -142,7 +192,7 @@ final class CodexService: ObservableObject {
         }
 
         let sessions = Array(byCwd.values).sorted { $0.memoryMB > $1.memoryMB }
-        return ScanResult(sessions: sessions, rateLimits: newestRateLimits?.status)
+        return ScanResult(sessions: sessions, rateLimits: newestRateLimits?.status, updatedCache: nextCache)
     }
 
     // MARK: - Process detection
@@ -226,26 +276,7 @@ final class CodexService: ObservableObject {
     }
 
     nonisolated private static func workingDirectory(for pid: Int32) -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-p", "\(pid)", "-Fn"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-
-        do {
-            try task.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            guard let output = String(data: data, encoding: .utf8) else { return "" }
-            var foundCwd = false
-            for line in output.components(separatedBy: "\n") {
-                if line == "fcwd" { foundCwd = true }
-                else if foundCwd && line.hasPrefix("n") { return String(line.dropFirst()) }
-            }
-        } catch {}
-        return ""
+        ProcCwd.of(pid: pid) ?? ""
     }
 
     // MARK: - Rollout file scanning
