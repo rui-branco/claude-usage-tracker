@@ -1,33 +1,64 @@
 import Foundation
 
-// MARK: - OAuth credentials file (~/.gemini/oauth_creds.json)
+// MARK: - OAuth credentials (file or Keychain)
 
-struct GeminiOAuthCreds: Decodable {
+/// Unified OAuth credentials used by both the legacy Gemini CLI (file at
+/// ~/.gemini/oauth_creds.json, epoch-ms expiry) and the Antigravity CLI
+/// (macOS Keychain: service=gemini, account=antigravity, with the token
+/// nested under `token` and ISO-8601 expiry).
+struct GeminiOAuthCreds {
+    let accessToken: String
+    let expiry: Date?
+}
+
+/// Wire format for the legacy gemini-cli file.
+struct GeminiFileCreds: Decodable {
     let accessToken: String?
-    let refreshToken: String?
     let expiryDate: Double?  // epoch milliseconds
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
-        case refreshToken = "refresh_token"
         case expiryDate = "expiry_date"
     }
 }
 
-// MARK: - Quota API (cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota)
+/// Wire format for the Antigravity Keychain entry. The Keychain value is
+/// `go-keyring-base64:<base64-encoded JSON>` and the JSON wraps the OAuth
+/// token under a `token` key.
+struct GeminiKeychainCreds: Decodable {
+    struct Token: Decodable {
+        let accessToken: String?
+        let expiry: String?  // ISO-8601, e.g. "2026-05-20T21:23:40.010309+01:00"
 
-struct GeminiQuotaResponse: Decodable {
-    let buckets: [GeminiQuotaBucket]?
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case expiry
+        }
+    }
+    let token: Token?
 }
 
-struct GeminiQuotaBucket: Decodable {
+// MARK: - Quota API (cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels)
+//
+// Requires `User-Agent: antigravity` plus `{"project": "<cloudaicompanionProject>"}`
+// in the body. Returns the friendly per-effort model catalog Antigravity's TUI
+// quota view uses (e.g. "Gemini 3.1 Pro (High)", "Claude Sonnet 4.6 (Thinking)")
+// with each entry's remaining quota and reset time.
+
+struct GeminiAvailableModelsResponse: Decodable {
+    let models: [String: GeminiAvailableModel]?
+}
+
+struct GeminiAvailableModel: Decodable {
+    let displayName: String?
+    let quotaInfo: GeminiQuotaInfo?
+    let disabled: Bool?
+    let beta: Bool?
+}
+
+struct GeminiQuotaInfo: Decodable {
     let remainingFraction: Double?
     let resetTime: String?
-    let modelId: String?
-    let tokenType: String?
-    /// Sent only on paid Code Assist plans when a project ID is included. Absolute
-    /// number of remaining requests (string-encoded int).
-    let remainingAmount: String?
 }
 
 // MARK: - Session JSONL header (~/.gemini/tmp/<project>/chats/session-*.jsonl)

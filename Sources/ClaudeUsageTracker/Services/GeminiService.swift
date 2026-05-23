@@ -293,27 +293,33 @@ final class GeminiService: ObservableObject {
                 || line.contains("claude-commands-mcp")
                 || line.contains("Google Chrome")
                 || line.contains("/Gemini.app/")            // Gemini macOS desktop app
-                || line.contains("Antigravity")             // Google Antigravity wrapper
+                || line.contains("/Antigravity.app/")       // Antigravity macOS desktop app
                 || line.contains("gemini-cli-mcp")
                 || line.contains("forge-deck") {
                 continue
             }
-
-            // Gemini CLI is installed via npm. Match either the wrapper bin/gemini
-            // or a node process whose command line contains gemini-cli's entrypoint.
-            let isWrapper = line.contains("/bin/gemini ") || line.hasSuffix("/bin/gemini")
-            let isNodeGemini = line.contains("node") && (
-                line.contains("@google/gemini-cli") ||
-                line.contains("/gemini-cli/") ||
-                line.contains("/gemini/dist/")
-            )
-            guard isWrapper || isNodeGemini else { continue }
 
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let cols = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
             guard cols.count >= 3,
                   let pid = Int32(cols[0]),
                   let rssKB = Int(cols[1]) else { continue }
+            let cmdField = String(cols[2])
+
+            // Gemini CLI is installed via npm. Match either the wrapper bin/gemini
+            // or a node process whose command line contains gemini-cli's entrypoint.
+            let isGeminiWrapper = line.contains("/bin/gemini ") || line.hasSuffix("/bin/gemini")
+            let isNodeGemini = line.contains("node") && (
+                line.contains("@google/gemini-cli") ||
+                line.contains("/gemini-cli/") ||
+                line.contains("/gemini/dist/")
+            )
+            // Antigravity ships as the `agy` Go binary; match by first command
+            // token only — "agy" is too short for substring matching.
+            let firstToken = cmdField.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+            let isAgy = (firstToken as NSString).lastPathComponent == "agy"
+
+            guard isGeminiWrapper || isNodeGemini || isAgy else { continue }
 
             let cwd = workingDirectory(for: pid)
             result.append(GeminiProcess(pid: pid, memMB: rssKB / 1024, cwd: cwd))
@@ -361,31 +367,33 @@ final class GeminiService: ObservableObject {
     }
 
     nonisolated private static func fetchQuotaSync(credsURL: URL, projectId: String?) -> QuotaResult {
-        guard FileManager.default.fileExists(atPath: credsURL.path),
-              let credData = try? Data(contentsOf: credsURL),
-              let creds = try? JSONDecoder().decode(GeminiOAuthCreds.self, from: credData),
-              let token = creds.accessToken, !token.isEmpty else { return QuotaResult(status: nil, projectId: nil) }
+        // Prefer the Keychain entry written by Antigravity (`agy`), which keeps
+        // the token refreshed. Fall back to the legacy ~/.gemini/oauth_creds.json
+        // file for users still on the old gemini-cli.
+        guard let creds = loadKeychainCreds() ?? loadFileCreds(credsURL),
+              !creds.accessToken.isEmpty else { return QuotaResult(status: nil, projectId: nil) }
+        let token = creds.accessToken
 
         // Skip when the token has clearly expired — avoid a guaranteed 401.
-        if let expiryMs = creds.expiryDate {
-            let expiry = Date(timeIntervalSince1970: expiryMs / 1000)
-            if expiry < Date() { return QuotaResult(status: nil, projectId: nil) }
+        if let expiry = creds.expiry, expiry < Date() {
+            return QuotaResult(status: nil, projectId: nil)
         }
 
-        // Discover a GCP project on first call. Without one, the quota endpoint
-        // returns placeholder fractions (1.0 across the board); with one, real per-model usage.
+        // Antigravity quota is keyed by the user's "cloudaicompanion" project;
+        // LoadCodeAssist returns it.
         var discoveredProject: String?
-        let activeProject: String?
+        let activeProject: String
         if let projectId = projectId {
             activeProject = projectId
-        } else if let found = listFirstActiveProject(token: token) {
+        } else if let found = loadCloudAICompanionProject(token: token) {
             discoveredProject = found
             activeProject = found
         } else {
-            activeProject = nil
+            // fetchAvailableModels requires the project field — no point calling without it.
+            return QuotaResult(status: nil, projectId: nil)
         }
 
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
+        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") else {
             return QuotaResult(status: nil, projectId: discoveredProject)
         }
 
@@ -394,13 +402,11 @@ final class GeminiService: ObservableObject {
         request.timeoutInterval = 10
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let activeProject = activeProject {
-            // JSON-encode to handle any unusual characters in the project ID safely.
-            let body: [String: String] = ["project": activeProject]
-            request.httpBody = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
-        } else {
-            request.httpBody = Data("{}".utf8)
-        }
+        // The endpoint returns 403 PERMISSION_DENIED unless the request advertises
+        // itself as antigravity — agy sets this exact User-Agent string.
+        request.setValue("antigravity", forHTTPHeaderField: "User-Agent")
+        let body: [String: String] = ["project": activeProject]
+        request.httpBody = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
 
         let semaphore = DispatchSemaphore(value: 0)
         var responseData: Data?
@@ -415,61 +421,55 @@ final class GeminiService: ObservableObject {
         _ = semaphore.wait(timeout: .now() + 12)
 
         guard responseCode == 200, let data = responseData,
-              let decoded = try? JSONDecoder().decode(GeminiQuotaResponse.self, from: data),
-              let buckets = decoded.buckets, !buckets.isEmpty else {
+              let decoded = try? JSONDecoder().decode(GeminiAvailableModelsResponse.self, from: data),
+              let models = decoded.models, !models.isEmpty else {
             return QuotaResult(status: nil, projectId: discoveredProject)
         }
 
-        // Collapse to one entry per model: keep the bucket with the LOWEST remaining fraction
-        // (= the worst-case constraint for that model).
-        var byModel: [String: (fraction: Double, resetTime: String?)] = [:]
-        for bucket in buckets {
-            guard let model = bucket.modelId, let fraction = bucket.remainingFraction else { continue }
-            if let existing = byModel[model] {
-                if fraction < existing.fraction { byModel[model] = (fraction, bucket.resetTime) }
+        // Many model IDs map to the same human-readable label (e.g. gemini-3-flash-agent,
+        // gemini-pro-agent both alias to a labeled tier). Group by displayName, keep one
+        // entry per label with the lowest remaining fraction (= worst-case for that tier).
+        // Also drop entries with no displayName (background suggestion models like
+        // tab_flash_lite_preview / chat_NNNN) and disabled models.
+        var byLabel: [String: (fraction: Double, resetTime: String?)] = [:]
+        for (_, model) in models {
+            guard let label = model.displayName, !label.isEmpty,
+                  // Mirror Antigravity's own Model Quota view: only curated tier
+                  // variants — i.e. labels with an effort/thinking suffix in parens
+                  // like "(High)", "(Low)", "(Medium)", "(Thinking)". Drops the raw
+                  // entries ("Gemini 2.5 Pro", "Gemini 3 Flash", "Gemini 3.1 Flash
+                  // Image", "Gemini 3.1 Flash Lite") that share quota with a tier.
+                  label.contains("("),
+                  let quota = model.quotaInfo,
+                  let fraction = quota.remainingFraction,
+                  model.disabled != true else { continue }
+            if let existing = byLabel[label] {
+                if fraction < existing.fraction {
+                    byLabel[label] = (fraction, quota.resetTime)
+                }
             } else {
-                byModel[model] = (fraction, bucket.resetTime)
+                byLabel[label] = (fraction, quota.resetTime)
             }
         }
-        guard !byModel.isEmpty else { return QuotaResult(status: nil, projectId: discoveredProject) }
+        guard !byLabel.isEmpty else {
+            return QuotaResult(status: nil, projectId: discoveredProject)
+        }
 
-        let perModelAll: [(model: String, usedPercent: Double, resetAt: Date?, resetKey: String)] = byModel
+        // Only surface tiers the user has actually used. Display rounds to 0%
+        // below 0.5%, so anything lower is just visual noise. If nothing's been
+        // touched, return a nil status so the whole ANTIGRAVITY section hides.
+        let perModel: [(model: String, usedPercent: Double, resetAt: Date?)] = byLabel
             .sorted { $0.key < $1.key }
-            .map { entry in
-                (model: entry.key,
-                 usedPercent: max(0, min(100, (1.0 - entry.value.fraction) * 100)),
-                 resetAt: entry.value.resetTime.flatMap(parseISODate),
-                 resetKey: entry.value.resetTime ?? "")
+            .compactMap { entry in
+                let used = max(0, min(100, (1.0 - entry.value.fraction) * 100))
+                guard used >= 0.5 else { return nil }
+                return (model: entry.key,
+                        usedPercent: used,
+                        resetAt: entry.value.resetTime.flatMap(parseISODate))
             }
-
-        // Models that share a quota pool return identical (usedPercent, resetTime). Group
-        // by that signature and keep the newest variant — preview models sort after stable
-        // ones lexicographically ("2.5-pro" < "3-pro-preview" < "3.1-pro-preview"), so the
-        // last-sorted name in each pool is the one to show.
-        var pooled: [String: (model: String, usedPercent: Double, resetAt: Date?)] = [:]
-        for entry in perModelAll {
-            let signature = "\(Int(entry.usedPercent.rounded()))|\(entry.resetKey)"
-            let candidate = (model: entry.model, usedPercent: entry.usedPercent, resetAt: entry.resetAt)
-            if let existing = pooled[signature] {
-                if entry.model > existing.model { pooled[signature] = candidate }
-            } else {
-                pooled[signature] = candidate
-            }
+        guard let worst = perModel.max(by: { $0.usedPercent < $1.usedPercent }) else {
+            return QuotaResult(status: nil, projectId: discoveredProject)
         }
-        let deduped = pooled.values.sorted { $0.model < $1.model }
-
-        // Only show models the user has actually hit (display rounds to 0% below 0.5%).
-        // Fall back to the worst pool overall if nothing is used so the section never disappears.
-        let used = deduped.filter { $0.usedPercent >= 0.5 }
-        let perModel: [(model: String, usedPercent: Double, resetAt: Date?)]
-        if used.isEmpty {
-            perModel = deduped.max(by: { $0.usedPercent < $1.usedPercent }).map { [$0] } ?? []
-        } else {
-            perModel = used
-        }
-
-        // Most-pressured model drives the menu bar gauge.
-        let worst = perModel.max(by: { $0.usedPercent < $1.usedPercent }) ?? perModel.first!
 
         let status = GeminiRateLimitStatus(
             model: worst.model,
@@ -481,24 +481,79 @@ final class GeminiService: ObservableObject {
         return QuotaResult(status: status, projectId: discoveredProject)
     }
 
-    // MARK: - GCP project discovery
+    // MARK: - OAuth creds loaders
 
-    nonisolated private struct CloudProjectsResponse: Decodable {
-        let projects: [CloudProject]?
-    }
-    nonisolated private struct CloudProject: Decodable {
-        let projectId: String?
-        let lifecycleState: String?
+    /// Antigravity (`agy`) stores its OAuth token in the macOS Keychain under
+    /// service=`gemini`, account=`antigravity`. The raw value is prefixed with
+    /// `go-keyring-base64:` (go-keyring's encoding) followed by base64-encoded
+    /// JSON of the form `{"token":{"access_token":...,"expiry":"<ISO>"},"auth_method":...}`.
+    ///
+    /// Uses the `/usr/bin/security` CLI rather than `SecItemCopyMatching` so the
+    /// app doesn't trigger the macOS keychain access prompt — same approach as
+    /// [UsageAPIService.getTokenFromKeychain].
+    nonisolated private static func loadKeychainCreds() -> GeminiOAuthCreds? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard var raw = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+
+        let prefix = "go-keyring-base64:"
+        if raw.hasPrefix(prefix) { raw.removeFirst(prefix.count) }
+        guard let decoded = Data(base64Encoded: raw),
+              let parsed = try? JSONDecoder().decode(GeminiKeychainCreds.self, from: decoded),
+              let token = parsed.token?.accessToken, !token.isEmpty else { return nil }
+
+        let expiry = parsed.token?.expiry.flatMap(parseISODate)
+        return GeminiOAuthCreds(accessToken: token, expiry: expiry)
     }
 
-    /// Fetches the first ACTIVE GCP project the user has access to. Empirically every
-    /// project returns the same quota numbers (quota is per-user, not per-project),
-    /// so picking any active one is fine.
-    nonisolated private static func listFirstActiveProject(token: String) -> String? {
-        guard let url = URL(string: "https://cloudresourcemanager.googleapis.com/v1/projects") else { return nil }
+    /// Legacy ~/.gemini/oauth_creds.json — written by the old gemini-cli.
+    /// Antigravity does not refresh this file, so it goes stale once the user
+    /// switches over, but it is still the right source when only the old CLI
+    /// is installed.
+    nonisolated private static func loadFileCreds(_ url: URL) -> GeminiOAuthCreds? {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(GeminiFileCreds.self, from: data),
+              let token = decoded.accessToken, !token.isEmpty else { return nil }
+        let expiry = decoded.expiryDate.map { Date(timeIntervalSince1970: $0 / 1000) }
+        return GeminiOAuthCreds(accessToken: token, expiry: expiry)
+    }
+
+    // MARK: - Project discovery
+
+    nonisolated private struct LoadCodeAssistResponse: Decodable {
+        let cloudaicompanionProject: String?
+    }
+
+    /// Calls LoadCodeAssist to look up the user's `cloudaicompanionProject` id,
+    /// which `fetchAvailableModels` requires in the request body. Cached at the
+    /// service level after first success so we don't repeat this on every poll.
+    nonisolated private static func loadCloudAICompanionProject(token: String) -> String? {
+        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist") else { return nil }
         var request = URLRequest(url: url)
+        request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{}".utf8)
 
         let semaphore = DispatchSemaphore(value: 0)
         var responseData: Data?
@@ -512,10 +567,9 @@ final class GeminiService: ObservableObject {
         _ = semaphore.wait(timeout: .now() + 12)
 
         guard responseCode == 200, let data = responseData,
-              let decoded = try? JSONDecoder().decode(CloudProjectsResponse.self, from: data) else { return nil }
-        return decoded.projects?
-            .first(where: { ($0.lifecycleState ?? "").uppercased() == "ACTIVE" && !($0.projectId ?? "").isEmpty })?
-            .projectId
+              let decoded = try? JSONDecoder().decode(LoadCodeAssistResponse.self, from: data),
+              let project = decoded.cloudaicompanionProject, !project.isEmpty else { return nil }
+        return project
     }
 
     nonisolated private static func parseISODate(_ value: String) -> Date? {

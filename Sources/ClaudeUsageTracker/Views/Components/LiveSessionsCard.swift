@@ -305,7 +305,7 @@ struct GeminiInlineRow: View {
                 .foregroundColor(.primary)
                 .lineLimit(1)
 
-            Text("gemini")
+            Text("antigravity")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundColor(.blue.opacity(0.85))
                 .padding(.horizontal, 4)

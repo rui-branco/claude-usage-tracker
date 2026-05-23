@@ -82,7 +82,7 @@ struct RateLimitCard: View {
                 if rateLimit != nil || codexLimits != nil {
                     Divider().opacity(0.4)
                 }
-                SourceLabel(text: "GEMINI", color: .blue, iconAsset: "gemini-icon")
+                SourceLabel(text: "ANTIGRAVITY", color: .blue, iconAsset: "gemini-icon")
 
                 // One bar per model returned by the quota API. The worst one drives
                 // MenuBarState.geminiSessionPercent (see GeminiService.probeQuota).
