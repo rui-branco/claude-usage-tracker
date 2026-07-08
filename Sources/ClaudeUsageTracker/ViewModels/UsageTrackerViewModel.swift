@@ -205,7 +205,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     enrichedSessions[i].contextPercent = contextWindow.usedPercentage
                     enrichedSessions[i].isRealtime = true
                     if let model = cache.model {
-                        enrichedSessions[i].modelName = model.displayName ?? model.id.map(formatModelName)
+                        enrichedSessions[i].modelName = model.displayName ?? model.id
                     }
                     break
                 }
@@ -429,30 +429,16 @@ final class UsageTrackerViewModel: ObservableObject {
     // MARK: - Formatting Helpers
 
     private func formatModelName(_ model: String) -> String {
-        let m = model.lowercased()
-        if m.contains("fable") { return "Fable 5" }
-        if m.contains("opus") {
-            if m.contains("4-8") || m.contains("4.8") || m.contains("4_8") { return "Opus 4.8" }
-            if m.contains("4-7") || m.contains("4.7") || m.contains("4_7") { return "Opus 4.7" }
-            if m.contains("4-6") || m.contains("4.6") || m.contains("4_6") { return "Opus 4.6" }
-            if m.contains("4-5") || m.contains("4.5") || m.contains("4_5") { return "Opus 4.5" }
-            return "Opus"
-        }
-        if m.contains("sonnet") {
-            if m.contains("4-6") || m.contains("4.6") || m.contains("4_6") { return "Sonnet 4.6" }
-            if m.contains("4-5") || m.contains("4.5") || m.contains("4_5") { return "Sonnet 4.5" }
-            return "Sonnet"
-        }
-        if m.contains("haiku") { return "Haiku 4.5" }
+        if model.contains("opus") { return "Opus 4.5" }
+        if model.contains("sonnet") { return "Sonnet 4.5" }
+        if model.contains("haiku") { return "Haiku 4.5" }
         return model.replacingOccurrences(of: "claude-", with: "").prefix(15).description
     }
 
     private func colorForModel(_ model: String) -> Color {
-        let m = model.lowercased()
-        if m.contains("fable") { return .pink }
-        if m.contains("opus") { return .purple }
-        if m.contains("sonnet") { return .blue }
-        if m.contains("haiku") { return .green }
+        if model.contains("opus") { return .purple }
+        if model.contains("sonnet") { return .blue }
+        if model.contains("haiku") { return .green }
         return .gray
     }
 
@@ -460,8 +446,7 @@ final class UsageTrackerViewModel: ObservableObject {
         switch count {
         case 0..<1000: return "\(count)"
         case 1000..<1_000_000: return String(format: "%.1fK", Double(count) / 1000)
-        case 1_000_000..<1_000_000_000: return String(format: "%.1fM", Double(count) / 1_000_000)
-        default: return String(format: "%.1fB", Double(count) / 1_000_000_000)
+        default: return String(format: "%.1fM", Double(count) / 1_000_000)
         }
     }
 }
