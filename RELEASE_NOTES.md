@@ -1,8 +1,7 @@
-### Antigravity quota + no more keychain prompt
+### Fable 5 support
 
-The rate-limit section was showing a stale model list at 0% across the board because it was hitting the old Gemini Code Assist quota endpoint. This release switches to the same `fetchAvailableModels` endpoint Antigravity itself uses, so the popover now mirrors the tiers shown in `agy`'s Model Quota view (3.5 Flash High/Medium, 3.1 Pro High/Low, Claude Sonnet/Opus, GPT-OSS).
+The tracker now recognizes Anthropic's Fable 5 model (`claude-fable-5`) everywhere it already knew Opus, Sonnet, and Haiku.
 
-- Calls `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels` with the `User-Agent: antigravity` header that unlocks the curated quota data
-- Groups by display name, shows only the effort-tiered variants, hides tiers with no usage so the section disappears entirely when nothing's active
-- Reads the Antigravity OAuth token via the `/usr/bin/security` CLI instead of `SecItemCopyMatching` — macOS no longer pops up a keychain access prompt on launch (same approach the Claude credentials path already used)
-- Renames the popover section label from GEMINI to ANTIGRAVITY and adds the `agy` Go binary to the live-process scanner
+- Live session rows show **Fable 5** (in pink) instead of the raw `claude-fable-5` model ID when Claude Code's session cache doesn't provide a friendly display name
+- Added Fable 5 to the model name/color helpers used by the per-model token breakdown
+- Added Fable 5 pricing to the cost estimator ($10/MTok input, $50/MTok output, ~$1/MTok cache read → ~$1.90/MTok blended input)

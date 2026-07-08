@@ -205,7 +205,7 @@ final class UsageTrackerViewModel: ObservableObject {
                     enrichedSessions[i].contextPercent = contextWindow.usedPercentage
                     enrichedSessions[i].isRealtime = true
                     if let model = cache.model {
-                        enrichedSessions[i].modelName = model.displayName ?? model.id
+                        enrichedSessions[i].modelName = model.displayName ?? model.id.map(formatModelName)
                     }
                     break
                 }
@@ -429,16 +429,20 @@ final class UsageTrackerViewModel: ObservableObject {
     // MARK: - Formatting Helpers
 
     private func formatModelName(_ model: String) -> String {
-        if model.contains("opus") { return "Opus 4.5" }
-        if model.contains("sonnet") { return "Sonnet 4.5" }
-        if model.contains("haiku") { return "Haiku 4.5" }
+        let m = model.lowercased()
+        if m.contains("fable") { return "Fable 5" }
+        if m.contains("opus") { return "Opus 4.5" }
+        if m.contains("sonnet") { return "Sonnet 4.5" }
+        if m.contains("haiku") { return "Haiku 4.5" }
         return model.replacingOccurrences(of: "claude-", with: "").prefix(15).description
     }
 
     private func colorForModel(_ model: String) -> Color {
-        if model.contains("opus") { return .purple }
-        if model.contains("sonnet") { return .blue }
-        if model.contains("haiku") { return .green }
+        let m = model.lowercased()
+        if m.contains("fable") { return .pink }
+        if m.contains("opus") { return .purple }
+        if m.contains("sonnet") { return .blue }
+        if m.contains("haiku") { return .green }
         return .gray
     }
 

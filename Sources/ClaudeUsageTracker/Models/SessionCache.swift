@@ -56,7 +56,11 @@ struct ContextWindow: Codable {
         // Cache read is 10x cheaper than fresh input, so blended input rate is much lower
         let (inputBlendedRate, outputRate): (Double, Double) = {
             guard let model = modelId?.lowercased() else { return (0.57, 15.0) }
-            if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus_4_5") {
+            if model.contains("fable") {
+                // Fable 5: $10 input, $1 cache read, $50 output
+                // Blended input: ~$1.90/MTok (90% cache at $1 + 10% fresh at $10)
+                return (1.90, 50.0)
+            } else if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus_4_5") {
                 // Opus 4.5: $5 input, $0.50 cache read, $25 output
                 // Blended input: ~$0.95/MTok (90% cache at $0.50 + 10% fresh at $5)
                 return (0.95, 25.0)
