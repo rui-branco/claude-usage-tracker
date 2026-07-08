@@ -61,15 +61,23 @@ struct MenuBarView: View {
         return min(max(base, 1), maxScrollHeight)
     }
 
+    private var rateLimitsVisible: Bool {
+        settings.showRateLimits && (viewModel.rateLimitStatus != nil
+            || (settings.showCodexRateLimits && codexService.rateLimits != nil)
+            || (settings.showGeminiRateLimits && geminiService.rateLimits != nil))
+    }
+
+    private var modelUsageVisible: Bool {
+        !viewModel.periodTokensByModel.isEmpty
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Content (header removed — popover opens straight into the data)
             ScrollView {
                 VStack(spacing: 16) {
                     // Rate Limits (Claude + Codex + Gemini together)
-                    if settings.showRateLimits, viewModel.rateLimitStatus != nil
-                        || (settings.showCodexRateLimits && codexService.rateLimits != nil)
-                        || (settings.showGeminiRateLimits && geminiService.rateLimits != nil) {
+                    if rateLimitsVisible {
                         RateLimitCard(
                             rateLimit: viewModel.rateLimitStatus,
                             codexLimits: settings.showCodexRateLimits ? codexService.rateLimits : nil,
@@ -77,12 +85,19 @@ struct MenuBarView: View {
                         )
                     }
 
-                    if settings.showRateLimits && settings.showLiveSessions {
-                        SectionSeparator()
+                    // Usage by model (all-time per-model token totals, incl. Fable 5)
+                    if modelUsageVisible {
+                        if rateLimitsVisible {
+                            SectionSeparator()
+                        }
+                        ModelUsageCard(models: viewModel.periodTokensByModel)
                     }
 
                     // Live Sessions (Claude + Codex in one list)
                     if settings.showLiveSessions {
+                        if rateLimitsVisible || modelUsageVisible {
+                            SectionSeparator()
+                        }
                         LiveSessionsCard(
                             sessions: viewModel.liveClaudeSessions,
                             isLoading: viewModel.isLoadingSessions,
