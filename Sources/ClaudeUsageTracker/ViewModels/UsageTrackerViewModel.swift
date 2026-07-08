@@ -114,12 +114,25 @@ final class UsageTrackerViewModel: ObservableObject {
         let fiveHourPercent = Int(min(max(usage.fiveHour.utilization, 0), 100))
         let sevenDayPercent = Int(min(max(usage.sevenDay.utilization, 0), 100))
 
+        // Per-model weekly caps (e.g. Fable) from the `limits` array.
+        let scopedWeekly: [ScopedLimitData] = (usage.limits ?? []).compactMap { entry in
+            guard entry.kind == "weekly_scoped",
+                  let name = entry.scope?.model?.displayName,
+                  let resetAt = entry.resetsAt else { return nil }
+            return ScopedLimitData(
+                name: name,
+                used: Int(min(max(entry.percent, 0), 100)),
+                resetAt: resetAt
+            )
+        }
+
         let data = RateLimitData(
             planName: "Max",
             fiveHour: fiveHourPercent,
             sevenDay: sevenDayPercent,
             fiveHourResetAt: usage.fiveHour.resetsAt,
-            sevenDayResetAt: usage.sevenDay.resetsAt
+            sevenDayResetAt: usage.sevenDay.resetsAt,
+            scopedWeekly: scopedWeekly.isEmpty ? nil : scopedWeekly
         )
         let cache = RateLimitCache(
             data: data,
@@ -296,6 +309,14 @@ final class UsageTrackerViewModel: ObservableObject {
 
         status.recentSessionBurnRate = recentSessionRate
         status.recentWeeklyBurnRate = recentWeeklyRate
+
+        status.scopedWeekly = (cache.data.scopedWeekly ?? []).map { scoped in
+            ScopedLimit(
+                name: scoped.name,
+                used: scoped.used,
+                resetAt: formatter.date(from: scoped.resetAt) ?? sevenDayReset
+            )
+        }
 
         rateLimitStatus = status
 

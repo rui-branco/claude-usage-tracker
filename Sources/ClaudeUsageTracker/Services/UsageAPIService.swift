@@ -17,10 +17,13 @@ final class UsageAPIService: @unchecked Sendable {
     struct UsageResponse: Codable {
         let fiveHour: UsageWindow
         let sevenDay: UsageWindow
+        // Modern per-limit list; carries per-model weekly caps (e.g. Fable).
+        let limits: [LimitEntry]?
 
         enum CodingKeys: String, CodingKey {
             case fiveHour = "five_hour"
             case sevenDay = "seven_day"
+            case limits
         }
     }
 
@@ -31,6 +34,35 @@ final class UsageAPIService: @unchecked Sendable {
         enum CodingKeys: String, CodingKey {
             case utilization
             case resetsAt = "resets_at"
+        }
+    }
+
+    // One entry in the usage API's `limits` array. `weekly_scoped` entries carry
+    // a per-model cap (e.g. Fable) in `scope.model.displayName`.
+    struct LimitEntry: Codable {
+        let kind: String
+        let group: String?
+        let percent: Double
+        let resetsAt: String?
+        let scope: LimitScope?
+
+        enum CodingKeys: String, CodingKey {
+            case kind, group, percent, scope
+            case resetsAt = "resets_at"
+        }
+    }
+
+    struct LimitScope: Codable {
+        let model: LimitModel?
+    }
+
+    struct LimitModel: Codable {
+        let id: String?
+        let displayName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case displayName = "display_name"
         }
     }
 

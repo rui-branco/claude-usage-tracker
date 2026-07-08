@@ -53,6 +53,16 @@ struct RateLimitCard: View {
                     etaIsWarning: rateLimit.weeklyEndsBeforeReset,
                     tickCount: 7
                 )
+
+                // Per-model weekly caps (e.g. Fable), from the usage API's limits list.
+                ForEach(Array(rateLimit.scopedWeekly.enumerated()), id: \.offset) { _, scoped in
+                    RateLimitBar(
+                        label: scoped.name,
+                        percent: Double(scoped.used),
+                        resetText: formatResetDay(scoped.resetAt),
+                        tickCount: 7
+                    )
+                }
             }
 
             if let codex = codexLimits {

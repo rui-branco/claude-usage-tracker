@@ -11,6 +11,23 @@ struct RateLimitData: Codable {
     let sevenDay: Int
     let fiveHourResetAt: String
     let sevenDayResetAt: String
+    // Per-model weekly caps (e.g. "Fable"), returned in the usage API's `limits`
+    // array as kind "weekly_scoped". Optional for backward-compat with old caches.
+    let scopedWeekly: [ScopedLimitData]?
+}
+
+// A per-model weekly limit as persisted in the cache (reset stored as ISO8601).
+struct ScopedLimitData: Codable {
+    let name: String
+    let used: Int
+    let resetAt: String
+}
+
+// A per-model weekly limit resolved for display (reset as a Date).
+struct ScopedLimit {
+    let name: String       // e.g. "Fable"
+    let used: Int          // Percentage used (0-100)
+    let resetAt: Date
 }
 
 struct RateLimitStatus {
@@ -23,6 +40,9 @@ struct RateLimitStatus {
     // Recent burn rate tracking (calculated from delta since last check)
     var recentSessionBurnRate: Double?   // % per hour based on recent change
     var recentWeeklyBurnRate: Double?    // % per hour based on recent change
+
+    // Per-model weekly caps (e.g. "Fable"), shown as extra bars under Weekly.
+    var scopedWeekly: [ScopedLimit] = []
 
     var fiveHourUsedPercent: Double {
         Double(fiveHourUsed)
