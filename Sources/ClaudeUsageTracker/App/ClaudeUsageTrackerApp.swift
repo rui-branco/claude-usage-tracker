@@ -47,7 +47,7 @@ struct SessionMenuBarLabel: View {
             ClaudeMenuIcon()
 
             if settings.showMenuBarPercentage {
-                let codexVisible = settings.showCodexInMenuBar && state.codexSessionPercent != nil
+                let codexVisible = settings.showCodexInMenuBar && state.codexWeeklyPercent != nil
                 let geminiVisible = settings.showGeminiInMenuBar && state.geminiSessionPercent != nil
                 let showResetCountdown = (state.sessionPercent ?? 0) >= 100
                     && state.fiveHourResetAt.map { $0 > currentTime } ?? false
@@ -59,7 +59,7 @@ struct SessionMenuBarLabel: View {
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 } else {
                     Text(buildLabel(claude: state.sessionPercent,
-                                    codex: codexVisible ? state.codexSessionPercent : nil,
+                                    codex: codexVisible ? state.codexWeeklyPercent : nil,
                                     gemini: geminiVisible ? state.geminiSessionPercent : nil))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
@@ -124,7 +124,7 @@ class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
     @Published var fiveHourResetAt: Date?
-    @Published var codexSessionPercent: Int?
+    @Published var codexWeeklyPercent: Int?
     @Published var geminiSessionPercent: Int?
 }
 

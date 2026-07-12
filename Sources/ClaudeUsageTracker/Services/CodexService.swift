@@ -9,7 +9,7 @@ final class CodexService: ObservableObject {
     @Published var hasCodexInstalled: Bool = false
 
     private var timer: Timer?
-    /// Codex's scan() is the only writer of MenuBarState.codexSessionPercent,
+    /// Codex's scan() is the only writer of MenuBarState.codexWeeklyPercent,
     /// and that label is visible whenever showCodexInMenuBar is on — even
     /// while the popover is closed. So we keep a single 5s cadence rather
     /// than throttling by popover visibility; the JSONL parse cache and
@@ -81,11 +81,11 @@ final class CodexService: ObservableObject {
         if let limits = result.rateLimits {
             self.rateLimits = limits
         }
-        // Publish 5h % to the menu bar label, but only if data is still in-window.
-        if let limits = self.rateLimits, !limits.primaryIsStale {
-            MenuBarState.shared.codexSessionPercent = Int(limits.primaryUsedPercent.rounded())
+        // Publish the weekly % to the menu bar label, but only if data is still in-window.
+        if let limits = self.rateLimits, !limits.secondaryIsStale {
+            MenuBarState.shared.codexWeeklyPercent = Int(limits.secondaryUsedPercent.rounded())
         } else {
-            MenuBarState.shared.codexSessionPercent = nil
+            MenuBarState.shared.codexWeeklyPercent = nil
         }
         self.isLoading = false
     }

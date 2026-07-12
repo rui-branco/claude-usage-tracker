@@ -71,15 +71,10 @@ struct RateLimitCard: View {
                 }
                 SourceLabel(text: "CODEX\(codex.planType.isEmpty ? "" : " · \(codex.planType.uppercased())")", color: .green, iconAsset: "codex-icon")
 
-                // When the saved reset has elapsed the window has rolled over —
-                // show the bar at 0% rather than carrying the stale percentage.
-                RateLimitBar(
-                    label: "Session",
-                    percent: codex.primaryIsStale ? 0 : codex.primaryUsedPercent,
-                    resetText: codex.primaryIsStale ? "—" : formatTimeUntil(codex.primaryResetAt),
-                    tickCount: 5
-                )
-
+                // Codex's 5h "Session" window is near-permanently 0% on these plans, so
+                // only the weekly cap is shown. When the saved reset has elapsed the
+                // window has rolled over — show the bar at 0% rather than carrying the
+                // stale percentage.
                 RateLimitBar(
                     label: "Weekly",
                     percent: codex.secondaryIsStale ? 0 : codex.secondaryUsedPercent,
