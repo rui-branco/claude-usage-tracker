@@ -41,6 +41,7 @@ struct MenuBarView: View {
     @ObservedObject var settings: SettingsService
     @ObservedObject var codexService: CodexService
     @ObservedObject var geminiService: GeminiService
+    @ObservedObject private var sleepPrevention = SleepPreventionService.shared
 
     // Actual measured content height, written by the GeometryReader below.
     @State private var measuredHeight: CGFloat = 0
@@ -118,10 +119,48 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Keep-awake toggle (system-wide `pmset disablesleep`)
+            keepAwakeRow
+
+            Divider()
+
             // Footer
             footerView
         }
         .frame(width: 320)
+    }
+
+    private var keepAwakeRow: some View {
+        // While a change is in flight the switch shows the requested position
+        // (pendingTarget) instead of snapping back to the verified state.
+        let displayedOn = sleepPrevention.pendingTarget ?? sleepPrevention.isEnabled
+        return HStack {
+            Text("Prevent sleep when lid is closed")
+                .font(.caption)
+                .foregroundColor(displayedOn ? .primary : .secondary)
+
+            Spacer()
+
+            if sleepPrevention.isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
+            }
+
+            Toggle("", isOn: Binding(
+                get: { displayedOn },
+                set: { sleepPrevention.setEnabled($0) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .labelsHidden()
+            .accessibilityLabel("Prevent sleep when lid is closed")
+            .disabled(sleepPrevention.isBusy)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .help("Disables system sleep entirely so the Mac stays awake even with the lid closed. The first change asks for an administrator password once; after that, toggling is instant. Stays on after quitting the app — turn it off before packing your Mac. May increase heat and battery use.")
+        .onAppear { sleepPrevention.refreshFromSystem() }
     }
 
     private var footerView: some View {
