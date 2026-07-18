@@ -19,6 +19,17 @@ final class CodexService: ObservableObject {
     private let rolloutLookbackDays: Int = 2
     private let maxFileSize: Int = 10 * 1024 * 1024
 
+    /// The authoritative weekly usage comes from the live API, polled less
+    /// aggressively than the 5s rollout scan.
+    private var usageTimer: Timer?
+    private let usageInterval: TimeInterval = 60
+
+    /// Last authoritative value from the live usage API, and the last value we
+    /// derived from rollout files. `recomputePublishedRateLimits()` picks between
+    /// them: live wins while fresh, rollout is the offline fallback.
+    private var liveRateLimits: CodexRateLimitStatus?
+    private var lastRolloutRateLimits: CodexRateLimitStatus?
+
     /// Memoized parsed rollouts keyed by file path. Invalidated when (mtime, size)
     /// changes — unchanged files are reused, which is the dominant win since the
     /// 2-day lookback set rarely changes file-to-file between 5s ticks.
@@ -36,9 +47,15 @@ final class CodexService: ObservableObject {
 
     func start() {
         Task { await scan() }
+        Task { await probeUsage() }
         timer = Timer.scheduledTimer(withTimeInterval: scanInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.scan()
+            }
+        }
+        usageTimer = Timer.scheduledTimer(withTimeInterval: usageInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.probeUsage()
             }
         }
     }
@@ -46,10 +63,13 @@ final class CodexService: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        usageTimer?.invalidate()
+        usageTimer = nil
     }
 
     func refresh() {
         Task { await scan() }
+        Task { await probeUsage() }
     }
 
     /// Triggers an extra refresh when the popover opens so the live-sessions
@@ -77,17 +97,51 @@ final class CodexService: ObservableObject {
 
         self.rolloutCache = result.updatedCache
         self.sessions = result.sessions
-        // Keep last known rate limits if this scan didn't find newer ones
+        // The rollout parse is the offline fallback; remember it and let
+        // recompute pick between it and the live API value.
         if let limits = result.rateLimits {
-            self.rateLimits = limits
+            self.lastRolloutRateLimits = limits
         }
-        // Publish the weekly % to the menu bar label, but only if data is still in-window.
-        if let limits = self.rateLimits, !limits.secondaryIsStale {
-            MenuBarState.shared.codexWeeklyPercent = Int(limits.secondaryUsedPercent.rounded())
+        recomputePublishedRateLimits()
+        self.isLoading = false
+    }
+
+    /// Fetches the authoritative weekly usage from chatgpt.com and prefers it over
+    /// the rollout-derived value. Runs off the main actor. On any failure (offline,
+    /// expired token, non-200) it leaves the previous live value in place so a brief
+    /// blip doesn't wipe the number; a sustained failure ages it out via isStale.
+    private func probeUsage() async {
+        let authURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json")
+        let fetched = await Task.detached(priority: .utility) {
+            CodexService.fetchUsageSync(authURL: authURL)
+        }.value
+        if let fetched = fetched {
+            self.liveRateLimits = fetched
+        }
+        recomputePublishedRateLimits()
+    }
+
+    /// Single source of truth for the published `rateLimits` + menu-bar label.
+    /// Live API wins while fresh; otherwise fall back to the last rollout parse;
+    /// otherwise keep whatever we last had (shown as a stale placeholder).
+    private func recomputePublishedRateLimits() {
+        if let live = liveRateLimits, !live.isStale {
+            self.rateLimits = live
+        } else if let rollout = lastRolloutRateLimits, !rollout.isStale {
+            self.rateLimits = rollout
+        } else {
+            // Both stale (or absent): keep the most recently observed one so the
+            // "no recent data · Nh ago" placeholder reports an accurate timestamp.
+            self.rateLimits = [liveRateLimits, lastRolloutRateLimits]
+                .compactMap { $0 }
+                .max(by: { $0.updatedAt < $1.updatedAt }) ?? self.rateLimits
+        }
+
+        if let rl = self.rateLimits, !rl.isStale {
+            MenuBarState.shared.codexWeeklyPercent = Int(rl.weeklyUsedPercent.rounded())
         } else {
             MenuBarState.shared.codexWeeklyPercent = nil
         }
-        self.isLoading = false
     }
 
     // MARK: - Heavy lifting (off-main)
@@ -359,14 +413,26 @@ final class CodexService: ObservableObject {
     }
 
     nonisolated private static func makeRateLimitStatus(from raw: CodexRateLimitsRaw, observedAt: Date) -> CodexRateLimitStatus? {
-        guard let p = raw.primary, let s = raw.secondary,
-              let pReset = p.resetsAt, let sReset = s.resetsAt else { return nil }
+        // Codex historically reported two windows: a 5h "session" in `primary` and
+        // the weekly cap in `secondary`. As of Jul 2026 OpenAI dropped the 5h window
+        // — the weekly limit now arrives in `primary` with `secondary` null. Select
+        // the weekly window by its size (7 days = 10080 min) rather than by position
+        // so both the old and new payload shapes resolve correctly.
+        let windows = [raw.primary, raw.secondary]
+            .compactMap { $0 }
+            .filter { $0.resetsAt != nil }
+        // Prefer the exact 7-day window; else the largest window that is at least a
+        // day long. Never fall back to a short (e.g. 5h/300min) window — labelling
+        // that as "Weekly" would be the misleading number we're trying to avoid.
+        let weekly = windows.first(where: { $0.windowMinutes == 10080 })
+            ?? windows.filter { ($0.windowMinutes ?? 0) >= 1440 }
+                      .max(by: { ($0.windowMinutes ?? 0) < ($1.windowMinutes ?? 0) })
+        guard let weekly, let reset = weekly.resetsAt,
+              let used = weekly.usedPercent else { return nil }
         return CodexRateLimitStatus(
             planType: (raw.planType ?? "").capitalized,
-            primaryUsedPercent: p.usedPercent ?? 0,
-            secondaryUsedPercent: s.usedPercent ?? 0,
-            primaryResetAt: Date(timeIntervalSince1970: TimeInterval(pReset)),
-            secondaryResetAt: Date(timeIntervalSince1970: TimeInterval(sReset)),
+            weeklyUsedPercent: used,
+            weeklyResetAt: Date(timeIntervalSince1970: TimeInterval(reset)),
             updatedAt: observedAt
         )
     }
@@ -379,5 +445,111 @@ final class CodexService: ObservableObject {
         let f2 = ISO8601DateFormatter()
         f2.formatOptions = [.withInternetDateTime]
         return f2.date(from: value)
+    }
+
+    // MARK: - Live usage fetch (off-main)
+
+    /// GET chatgpt.com/backend-api/codex/usage using the Codex CLI's own OAuth
+    /// access token from ~/.codex/auth.json. This is the same weekly cap shown in
+    /// ChatGPT settings. Returns nil (caller keeps the prior value) if creds are
+    /// missing, the token has expired, or the request fails.
+    nonisolated private static func fetchUsageSync(authURL: URL) -> CodexRateLimitStatus? {
+        guard let data = try? Data(contentsOf: authURL),
+              let auth = try? JSONDecoder().decode(CodexAuthFile.self, from: data),
+              let token = auth.tokens?.accessToken, !token.isEmpty else { return nil }
+
+        // Skip a guaranteed-401 when the JWT has already expired. Codex refreshes
+        // this token itself on its next run; we never touch the refresh token.
+        if let exp = jwtExpiry(token), exp < Date() { return nil }
+
+        guard let url = URL(string: "https://chatgpt.com/backend-api/codex/usage") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let accountId = auth.tokens?.accountId, !accountId.isEmpty {
+            request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        request.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // chatgpt.com sits behind Cloudflare, which 403s requests that don't carry
+        // a Codex-shaped User-Agent (URLSession's default "AppName/x CFNetwork/…"
+        // gets blocked). Mirror the CLI's `codex_cli_rs/<ver> (…)` string so the
+        // edge accepts us. Verified: same request 200s with this UA, 403s without.
+        request.setValue(codexUserAgent(), forHTTPHeaderField: "User-Agent")
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var responseData: Data?
+        var responseCode = 0
+        let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            responseData = data
+            if let http = response as? HTTPURLResponse { responseCode = http.statusCode }
+            semaphore.signal()
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + 12)
+
+        guard responseCode == 200, let data = responseData,
+              let decoded = try? JSONDecoder().decode(CodexUsageResponse.self, from: data),
+              let rl = decoded.rateLimit else { return nil }
+
+        // Select the weekly window (7 days = 604800s). Mirrors the rollout parser:
+        // prefer the exact 7-day window, else the largest window at least a day
+        // long — never a short window mislabelled as "Weekly". Require a usage
+        // percentage so a malformed response doesn't render an authoritative 0%.
+        let windows = [rl.primaryWindow, rl.secondaryWindow]
+            .compactMap { $0 }
+            .filter { $0.resetAt != nil }
+        let weekly = windows.first(where: { $0.limitWindowSeconds == 604800 })
+            ?? windows.filter { ($0.limitWindowSeconds ?? 0) >= 86400 }
+                      .max(by: { ($0.limitWindowSeconds ?? 0) < ($1.limitWindowSeconds ?? 0) })
+        guard let weekly, let reset = weekly.resetAt,
+              let used = weekly.usedPercent else { return nil }
+
+        return CodexRateLimitStatus(
+            planType: (decoded.planType ?? "").capitalized,
+            weeklyUsedPercent: used,
+            weeklyResetAt: Date(timeIntervalSince1970: TimeInterval(reset)),
+            updatedAt: Date()
+        )
+    }
+
+    /// Builds a Codex-CLI-shaped User-Agent (`codex_cli_rs/<ver> (Macintosh; Darwin
+    /// <os>; <arch>)`). Cloudflare rejects requests to chatgpt.com that don't look
+    /// like a Codex client. The version is read from ~/.codex/version.json (the
+    /// CLI's own update-check cache) with a recent fallback if it's missing.
+    nonisolated private static func codexUserAgent() -> String {
+        let versionURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/version.json")
+        var version = "0.144.5"
+        if let data = try? Data(contentsOf: versionURL),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let v = obj["latest_version"] as? String, !v.isEmpty {
+            version = v
+        }
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        #if arch(arm64)
+        let arch = "arm64"
+        #elseif arch(x86_64)
+        let arch = "x86_64"
+        #else
+        let arch = "unknown"
+        #endif
+        return "codex_cli_rs/\(version) (Macintosh; Darwin \(os.majorVersion).\(os.minorVersion).\(os.patchVersion); \(arch))"
+    }
+
+    /// Decodes the `exp` claim from a JWT access token without validating the
+    /// signature — used only to skip a request we know would 401.
+    nonisolated private static func jwtExpiry(_ jwt: String) -> Date? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var b64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = obj["exp"] as? Double else { return nil }
+        return Date(timeIntervalSince1970: exp)
     }
 }

@@ -77,18 +77,17 @@ struct CodexRateWindowRaw: Decodable {
 
 struct CodexRateLimitStatus {
     let planType: String
-    let primaryUsedPercent: Double
-    let secondaryUsedPercent: Double
-    let primaryResetAt: Date
-    let secondaryResetAt: Date
+    let weeklyUsedPercent: Double
+    let weeklyResetAt: Date
     let updatedAt: Date
 
-    /// True when the saved 5h reset has already elapsed — the displayed % is from
-    /// a previous window, not the current one.
-    var primaryIsStale: Bool { primaryResetAt < Date() }
-
-    /// Same idea for the weekly window.
-    var secondaryIsStale: Bool { secondaryResetAt < Date() }
+    /// Stale when the window has rolled over (saved reset already elapsed) OR the
+    /// observation is too old to trust. The live usage API refreshes updatedAt
+    /// every ~60s; a value older than that means the API is unreachable and we've
+    /// fallen back to the last rollout parse, which may be out of date.
+    var isStale: Bool {
+        weeklyResetAt < Date() || Date().timeIntervalSince(updatedAt) > 30 * 60
+    }
 }
 
 /// A live codex session = a currently running codex CLI process plus (optionally)
@@ -100,4 +99,48 @@ struct CodexLiveSession: Identifiable, Equatable {
     let projectName: String
     let memoryMB: Int
     let totalTokens: Int?       // from rollout, may be nil if no match
+}
+
+// MARK: - Live usage API (chatgpt.com/backend-api/codex/usage)
+
+/// Subset of ~/.codex/auth.json needed to authenticate the usage request.
+struct CodexAuthFile: Decodable {
+    struct Tokens: Decodable {
+        let accessToken: String?
+        let accountId: String?
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case accountId = "account_id"
+        }
+    }
+    let tokens: Tokens?
+}
+
+struct CodexUsageResponse: Decodable {
+    let planType: String?
+    let rateLimit: CodexUsageRateLimit?
+    enum CodingKeys: String, CodingKey {
+        case planType = "plan_type"
+        case rateLimit = "rate_limit"
+    }
+}
+
+struct CodexUsageRateLimit: Decodable {
+    let primaryWindow: CodexUsageWindow?
+    let secondaryWindow: CodexUsageWindow?
+    enum CodingKeys: String, CodingKey {
+        case primaryWindow = "primary_window"
+        case secondaryWindow = "secondary_window"
+    }
+}
+
+struct CodexUsageWindow: Decodable {
+    let usedPercent: Double?
+    let limitWindowSeconds: Int?
+    let resetAt: Int?
+    enum CodingKeys: String, CodingKey {
+        case usedPercent = "used_percent"
+        case limitWindowSeconds = "limit_window_seconds"
+        case resetAt = "reset_at"
+    }
 }

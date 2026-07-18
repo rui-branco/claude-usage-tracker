@@ -71,16 +71,20 @@ struct RateLimitCard: View {
                 }
                 SourceLabel(text: "CODEX\(codex.planType.isEmpty ? "" : " · \(codex.planType.uppercased())")", color: .green, iconAsset: "codex-icon")
 
-                // Codex's 5h "Session" window is near-permanently 0% on these plans, so
-                // only the weekly cap is shown. When the saved reset has elapsed the
-                // window has rolled over — show the bar at 0% rather than carrying the
-                // stale percentage.
-                RateLimitBar(
-                    label: "Weekly",
-                    percent: codex.secondaryIsStale ? 0 : codex.secondaryUsedPercent,
-                    resetText: codex.secondaryIsStale ? "—" : formatResetDay(codex.secondaryResetAt),
-                    tickCount: 7
-                )
+                // Codex reports only the weekly cap (the 5h window was dropped). The
+                // live usage API keeps this fresh; if it's stale (API unreachable and
+                // the rollout fallback has aged out) show the no-recent-data placeholder
+                // instead of a misleading number.
+                if codex.isStale {
+                    StaleBarPlaceholder(label: "Weekly", lastSeen: codex.updatedAt)
+                } else {
+                    RateLimitBar(
+                        label: "Weekly",
+                        percent: codex.weeklyUsedPercent,
+                        resetText: formatResetDay(codex.weeklyResetAt),
+                        tickCount: 7
+                    )
+                }
             }
 
             if let gemini = geminiLimits {
