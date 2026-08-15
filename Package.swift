@@ -25,6 +25,7 @@ let package = Package(
                 .copy("Resources/claude-icon.png"),
                 .copy("Resources/codex-icon.png"),
                 .copy("Resources/gemini-icon.png"),
+                .copy("Resources/grok-icon.png"),
                 .copy("Resources/AppIcon.png"),
                 .copy("Resources/AppIcon.icns")
             ]

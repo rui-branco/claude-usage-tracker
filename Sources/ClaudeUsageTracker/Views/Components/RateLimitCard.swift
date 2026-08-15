@@ -113,7 +113,7 @@ struct RateLimitCard: View {
                 if rateLimit != nil || codexLimits != nil || geminiLimits != nil {
                     Divider().opacity(0.4)
                 }
-                SourceLabel(text: "GROK", color: .primary)
+                SourceLabel(text: "GROK", color: .primary, iconAsset: "grok-icon", iconIsTemplate: true)
 
                 if let grok = grokLimits {
                     if grok.isStale {
@@ -225,11 +225,12 @@ struct SourceLabel: View {
     let text: String
     let color: Color
     var iconAsset: String? = nil
+    var iconIsTemplate: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
             if let asset = iconAsset {
-                ProviderBrandIcon(asset: asset, size: 12)
+                ProviderBrandIcon(asset: asset, size: 12, template: iconIsTemplate, tint: color)
             } else {
                 Circle()
                     .fill(color)
@@ -249,17 +250,30 @@ struct SourceLabel: View {
 struct ProviderBrandIcon: View {
     let asset: String
     var size: CGFloat = 12
+    var template: Bool = false
+    var tint: Color = .primary
 
     var body: some View {
         if let url = ResourceLoader.url(forResource: asset, withExtension: "png"),
            let nsImage = NSImage(contentsOf: url) {
             nsImage.size = NSSize(width: size, height: size)
-            return AnyView(
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: size, height: size)
-            )
+            nsImage.isTemplate = template
+            if template {
+                return AnyView(
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .foregroundColor(tint)
+                        .frame(width: size, height: size)
+                )
+            } else {
+                return AnyView(
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: size, height: size)
+                )
+            }
         } else {
             return AnyView(
                 Circle()
