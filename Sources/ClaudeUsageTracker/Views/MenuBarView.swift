@@ -41,6 +41,7 @@ struct MenuBarView: View {
     @ObservedObject var settings: SettingsService
     @ObservedObject var codexService: CodexService
     @ObservedObject var geminiService: GeminiService
+    @ObservedObject var grokService: GrokService
     @ObservedObject private var sleepPrevention = SleepPreventionService.shared
 
     // Actual measured content height, written by the GeometryReader below.
@@ -67,14 +68,17 @@ struct MenuBarView: View {
             // Content (header removed — popover opens straight into the data)
             ScrollView {
                 VStack(spacing: 16) {
-                    // Rate Limits (Claude + Codex + Gemini together)
+                    // Rate Limits (Claude + Codex + Gemini + Grok together)
                     if settings.showRateLimits, viewModel.rateLimitStatus != nil
                         || (settings.showCodexRateLimits && codexService.rateLimits != nil)
-                        || (settings.showGeminiRateLimits && geminiService.rateLimits != nil) {
+                        || (settings.showGeminiRateLimits && geminiService.rateLimits != nil)
+                        || (settings.showGrokRateLimits && grokService.rateLimits != nil) {
                         RateLimitCard(
                             rateLimit: viewModel.rateLimitStatus,
                             codexLimits: settings.showCodexRateLimits ? codexService.rateLimits : nil,
-                            geminiLimits: settings.showGeminiRateLimits ? geminiService.rateLimits : nil
+                            geminiLimits: settings.showGeminiRateLimits ? geminiService.rateLimits : nil,
+                            grokLimits: settings.showGrokRateLimits ? grokService.rateLimits : nil,
+                            grokAuthState: grokService.authState
                         )
                     }
 

@@ -5,18 +5,21 @@ struct RateLimitCard: View {
     let rateLimit: RateLimitStatus?
     var codexLimits: CodexRateLimitStatus? = nil
     var geminiLimits: GeminiRateLimitStatus? = nil
+    var grokLimits: GrokRateLimitStatus? = nil
+    var grokAuthState: GrokService.GrokAuthState = .unknown
     @State private var refreshTrigger = Date()
 
     private var hasMultipleProviders: Bool {
         let count = (rateLimit != nil ? 1 : 0)
                   + (codexLimits != nil ? 1 : 0)
                   + (geminiLimits != nil ? 1 : 0)
+                  + (grokLimits != nil || grokAuthState != .unknown ? 1 : 0)
         return count > 1
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if rateLimit == nil && (codexLimits != nil || geminiLimits != nil) {
+            if rateLimit == nil && (codexLimits != nil || geminiLimits != nil || grokLimits != nil) {
                 // Other providers have data but Claude API is unreachable — make it explicit.
                 VStack(alignment: .leading, spacing: 4) {
                     SourceLabel(text: "CLAUDE", color: .orange, iconAsset: "claude-icon")
@@ -102,6 +105,31 @@ struct RateLimitCard: View {
                         resetText: entry.resetAt.map { formatGeminiResetClock($0) } ?? "—",
                         tickCount: 0
                     )
+                }
+            }
+
+            // Grok section
+            if grokLimits != nil || grokAuthState != .unknown {
+                if rateLimit != nil || codexLimits != nil || geminiLimits != nil {
+                    Divider().opacity(0.4)
+                }
+                SourceLabel(text: "GROK", color: .primary)
+
+                if let grok = grokLimits {
+                    if grok.isStale {
+                        StaleBarPlaceholder(label: "Weekly SuperGrok", lastSeen: grok.updatedAt)
+                    } else {
+                        RateLimitBar(
+                            label: "Weekly SuperGrok",
+                            percent: grok.usedPercent,
+                            resetText: grok.resetAt.map { formatResetDay($0) } ?? "—",
+                            tickCount: 7
+                        )
+                    }
+                } else if case .notAuthenticated(let reason) = grokAuthState {
+                    Text(reason)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
             }
         }

@@ -231,11 +231,13 @@ struct AppearanceSettingsTab: View {
                         .padding(.leading, 16)
                     Toggle("Include Gemini %", isOn: $settings.showGeminiInMenuBar)
                         .padding(.leading, 16)
+                    Toggle("Include Grok %", isOn: $settings.showGrokInMenuBar)
+                        .padding(.leading, 16)
                 }
             } header: {
                 Label("Menu Bar", systemImage: "menubar.rectangle")
             } footer: {
-                Text("Claude % in orange, Codex % in green, Gemini % in blue.")
+                Text("Claude % in orange, Codex % in green, Gemini % in blue, Grok % in default text color.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -265,6 +267,16 @@ struct AppearanceSettingsTab: View {
                 Label("Gemini", systemImage: "sparkles")
             } footer: {
                 Text("Gemini quota is fetched from Google's quota API using the OAuth token in ~/.gemini/oauth_creds.json. Sessions are read from ~/.gemini/tmp/.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
+                Toggle("Grok rate limits", isOn: $settings.showGrokRateLimits)
+            } header: {
+                Label("Grok", systemImage: "bolt.fill")
+            } footer: {
+                Text("Grok weekly usage is fetched using your local Grok CLI login. Run grok login to authenticate.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

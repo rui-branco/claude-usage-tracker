@@ -36,6 +36,12 @@ final class SettingsService: ObservableObject {
     @Published var showGeminiInMenuBar: Bool {
         didSet { UserDefaults.standard.set(showGeminiInMenuBar, forKey: "showGeminiInMenuBar") }
     }
+    @Published var showGrokRateLimits: Bool {
+        didSet { UserDefaults.standard.set(showGrokRateLimits, forKey: "showGrokRateLimits") }
+    }
+    @Published var showGrokInMenuBar: Bool {
+        didSet { UserDefaults.standard.set(showGrokInMenuBar, forKey: "showGrokInMenuBar") }
+    }
 
     // MARK: - Display Settings
     @Published var showMenuBarPercentage: Bool {
@@ -88,6 +94,8 @@ final class SettingsService: ObservableObject {
             "showGeminiRateLimits": true,
             "showGeminiSessions": true,
             "showGeminiInMenuBar": true,
+            "showGrokRateLimits": true,
+            "showGrokInMenuBar": true,
             // Display
             "showMenuBarPercentage": true,
             "compactMode": false,
@@ -125,6 +133,8 @@ final class SettingsService: ObservableObject {
         self.showGeminiRateLimits = defaults.bool(forKey: "showGeminiRateLimits")
         self.showGeminiSessions = defaults.bool(forKey: "showGeminiSessions")
         self.showGeminiInMenuBar = defaults.bool(forKey: "showGeminiInMenuBar")
+        self.showGrokRateLimits = defaults.bool(forKey: "showGrokRateLimits")
+        self.showGrokInMenuBar = defaults.bool(forKey: "showGrokInMenuBar")
 
         self.showMenuBarPercentage = defaults.bool(forKey: "showMenuBarPercentage")
         self.compactMode = defaults.bool(forKey: "compactMode")
@@ -182,6 +192,8 @@ final class SettingsService: ObservableObject {
         showGeminiRateLimits = true
         showGeminiSessions = true
         showGeminiInMenuBar = true
+        showGrokRateLimits = true
+        showGrokInMenuBar = true
         showMenuBarPercentage = true
         compactMode = false
         notificationsEnabled = true

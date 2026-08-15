@@ -49,10 +49,12 @@ struct SessionMenuBarLabel: View {
             if settings.showMenuBarPercentage {
                 let codexVisible = settings.showCodexInMenuBar && state.codexWeeklyPercent != nil
                 let geminiVisible = settings.showGeminiInMenuBar && state.geminiSessionPercent != nil
+                let grokVisible = settings.showGrokInMenuBar && state.grokWeeklyPercent != nil
                 let showResetCountdown = (state.sessionPercent ?? 0) >= 100
                     && state.fiveHourResetAt.map { $0 > currentTime } ?? false
                     && !codexVisible
                     && !geminiVisible
+                    && !grokVisible
 
                 if showResetCountdown, let resetAt = state.fiveHourResetAt {
                     Text(formatTimeUntil(resetAt))
@@ -60,7 +62,8 @@ struct SessionMenuBarLabel: View {
                 } else {
                     Text(buildLabel(claude: state.sessionPercent,
                                     codex: codexVisible ? state.codexWeeklyPercent : nil,
-                                    gemini: geminiVisible ? state.geminiSessionPercent : nil))
+                                    gemini: geminiVisible ? state.geminiSessionPercent : nil,
+                                    grok: grokVisible ? state.grokWeeklyPercent : nil))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
             }
@@ -72,7 +75,7 @@ struct SessionMenuBarLabel: View {
 
     /// macOS MenuBarExtra labels render most reliably as a single Text — colored
     /// substrings via AttributedString instead of an HStack of separate Texts.
-    private func buildLabel(claude: Int?, codex: Int?, gemini: Int?) -> AttributedString {
+    private func buildLabel(claude: Int?, codex: Int?, gemini: Int?, grok: Int?) -> AttributedString {
         var attr = AttributedString()
         var firstWritten = false
 
@@ -102,6 +105,17 @@ struct SessionMenuBarLabel: View {
             var g = AttributedString("\(gemini)%")
             g.foregroundColor = .blue
             attr += g
+            firstWritten = true
+        }
+        if let grok = grok {
+            if firstWritten {
+                var sep = AttributedString(" · ")
+                sep.foregroundColor = .secondary
+                attr += sep
+            }
+            var k = AttributedString("\(grok)%")
+            k.foregroundColor = .primary
+            attr += k
         }
         return attr
     }
@@ -126,6 +140,7 @@ class MenuBarState: ObservableObject {
     @Published var fiveHourResetAt: Date?
     @Published var codexWeeklyPercent: Int?
     @Published var geminiSessionPercent: Int?
+    @Published var grokWeeklyPercent: Int?
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -199,7 +214,8 @@ struct AppContentView: View {
                     viewModel: appState.viewModel!,
                     settings: appState.settings,
                     codexService: appState.codexService!,
-                    geminiService: appState.geminiService!
+                    geminiService: appState.geminiService!,
+                    grokService: appState.grokService!
                 )
             } else {
                 VStack {
@@ -228,6 +244,7 @@ class AppState: ObservableObject {
     @Published var viewModel: UsageTrackerViewModel?
     @Published var codexService: CodexService?
     @Published var geminiService: GeminiService?
+    @Published var grokService: GrokService?
     let settings = SettingsService.shared
 
     private var fileWatcher: FileWatcherService?
@@ -241,17 +258,20 @@ class AppState: ObservableObject {
         let pm = ProcessMonitorService()
         let codex = CodexService()
         let gemini = GeminiService()
+        let grok = GrokService()
 
         fileWatcher = fw
         processMonitor = pm
         codexService = codex
         geminiService = gemini
+        grokService = grok
 
         // Start services
         fw.start()
         pm.startMonitoring()
         codex.start()
         gemini.start()
+        grok.start()
 
         // Create view model
         viewModel = UsageTrackerViewModel(fileWatcher: fw, processMonitor: pm)
@@ -268,5 +288,6 @@ class AppState: ObservableObject {
         processMonitor?.setPopoverVisible(visible)
         codexService?.setPopoverVisible(visible)
         geminiService?.setPopoverVisible(visible)
+        grokService?.setPopoverVisible(visible)
     }
 }
