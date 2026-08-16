@@ -52,6 +52,7 @@ struct SessionMenuBarLabel: View {
                 let grokVisible = settings.showGrokInMenuBar && state.grokWeeklyPercent != nil
                 let showResetCountdown = (state.sessionPercent ?? 0) >= 100
                     && state.fiveHourResetAt.map { $0 > currentTime } ?? false
+                    && state.weeklyPercent == nil
                     && !codexVisible
                     && !geminiVisible
                     && !grokVisible
@@ -60,7 +61,8 @@ struct SessionMenuBarLabel: View {
                     Text(formatTimeUntil(resetAt))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 } else {
-                    Text(buildLabel(claude: state.sessionPercent,
+                    Text(buildLabel(claudeSession: state.sessionPercent,
+                                    claudeWeekly: state.weeklyPercent,
                                     codex: codexVisible ? state.codexWeeklyPercent : nil,
                                     gemini: geminiVisible ? state.geminiSessionPercent : nil,
                                     grok: grokVisible ? state.grokWeeklyPercent : nil))
@@ -75,12 +77,29 @@ struct SessionMenuBarLabel: View {
 
     /// macOS MenuBarExtra labels render most reliably as a single Text — colored
     /// substrings via AttributedString instead of an HStack of separate Texts.
-    private func buildLabel(claude: Int?, codex: Int?, gemini: Int?, grok: Int?) -> AttributedString {
+    private func buildLabel(
+        claudeSession: Int?,
+        claudeWeekly: Int?,
+        codex: Int?,
+        gemini: Int?,
+        grok: Int?
+    ) -> AttributedString {
         var attr = AttributedString()
         var firstWritten = false
 
-        if let claude = claude {
-            var c = AttributedString("\(claude)%")
+        // Claude: compact session/weekly when both available, otherwise just one
+        if let session = claudeSession, let weekly = claudeWeekly {
+            var c = AttributedString("\(session)%/\(weekly)%")
+            c.foregroundColor = .orange
+            attr += c
+            firstWritten = true
+        } else if let session = claudeSession {
+            var c = AttributedString("\(session)%")
+            c.foregroundColor = .orange
+            attr += c
+            firstWritten = true
+        } else if let weekly = claudeWeekly {
+            var c = AttributedString("\(weekly)%")
             c.foregroundColor = .orange
             attr += c
             firstWritten = true
@@ -137,6 +156,7 @@ struct SessionMenuBarLabel: View {
 class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
     @Published var sessionPercent: Int?
+    @Published var weeklyPercent: Int?
     @Published var fiveHourResetAt: Date?
     @Published var codexWeeklyPercent: Int?
     @Published var geminiSessionPercent: Int?

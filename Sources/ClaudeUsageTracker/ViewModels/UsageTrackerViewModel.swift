@@ -282,6 +282,7 @@ final class UsageTrackerViewModel: ObservableObject {
         guard let cache = cache else {
             rateLimitStatus = nil
             MenuBarState.shared.sessionPercent = nil
+            MenuBarState.shared.weeklyPercent = nil
             MenuBarState.shared.fiveHourResetAt = nil
             return
         }
@@ -321,6 +322,7 @@ final class UsageTrackerViewModel: ObservableObject {
         rateLimitStatus = status
 
         MenuBarState.shared.sessionPercent = cache.data.fiveHour
+        MenuBarState.shared.weeklyPercent = cache.data.sevenDay
         MenuBarState.shared.fiveHourResetAt = fiveHourReset
     }
 
