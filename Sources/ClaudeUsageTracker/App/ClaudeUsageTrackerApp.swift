@@ -40,7 +40,6 @@ struct ClaudeUsageTrackerApp: App {
 struct SessionMenuBarLabel: View {
     @ObservedObject private var state = MenuBarState.shared
     @ObservedObject private var settings = SettingsService.shared
-    @State private var currentTime = Date()
 
     var body: some View {
         HStack(spacing: 4) {
@@ -50,35 +49,19 @@ struct SessionMenuBarLabel: View {
                 let codexVisible = settings.showCodexInMenuBar && state.codexWeeklyPercent != nil
                 let geminiVisible = settings.showGeminiInMenuBar && state.geminiSessionPercent != nil
                 let grokVisible = settings.showGrokInMenuBar && state.grokWeeklyPercent != nil
-                let showResetCountdown = (state.sessionPercent ?? 0) >= 100
-                    && state.fiveHourResetAt.map { $0 > currentTime } ?? false
-                    && state.weeklyPercent == nil
-                    && !codexVisible
-                    && !geminiVisible
-                    && !grokVisible
 
-                if showResetCountdown, let resetAt = state.fiveHourResetAt {
-                    Text(formatTimeUntil(resetAt))
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                } else {
-                    Text(buildLabel(claudeSession: state.sessionPercent,
-                                    claudeWeekly: state.weeklyPercent,
-                                    codex: codexVisible ? state.codexWeeklyPercent : nil,
-                                    gemini: geminiVisible ? state.geminiSessionPercent : nil,
-                                    grok: grokVisible ? state.grokWeeklyPercent : nil))
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                }
+                Text(buildLabel(claudeWeekly: state.weeklyPercent,
+                                codex: codexVisible ? state.codexWeeklyPercent : nil,
+                                gemini: geminiVisible ? state.geminiSessionPercent : nil,
+                                grok: grokVisible ? state.grokWeeklyPercent : nil))
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
             }
-        }
-        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { time in
-            currentTime = time
         }
     }
 
     /// macOS MenuBarExtra labels render most reliably as a single Text — colored
     /// substrings via AttributedString instead of an HStack of separate Texts.
     private func buildLabel(
-        claudeSession: Int?,
         claudeWeekly: Int?,
         codex: Int?,
         gemini: Int?,
@@ -87,18 +70,8 @@ struct SessionMenuBarLabel: View {
         var attr = AttributedString()
         var firstWritten = false
 
-        // Claude: compact session/weekly when both available, otherwise just one
-        if let session = claudeSession, let weekly = claudeWeekly {
-            var c = AttributedString("\(session)%/\(weekly)%")
-            c.foregroundColor = .orange
-            attr += c
-            firstWritten = true
-        } else if let session = claudeSession {
-            var c = AttributedString("\(session)%")
-            c.foregroundColor = .orange
-            attr += c
-            firstWritten = true
-        } else if let weekly = claudeWeekly {
+        // Claude: weekly percentage only
+        if let weekly = claudeWeekly {
             var c = AttributedString("\(weekly)%")
             c.foregroundColor = .orange
             attr += c
@@ -138,26 +111,12 @@ struct SessionMenuBarLabel: View {
         }
         return attr
     }
-
-    private func formatTimeUntil(_ date: Date) -> String {
-        let interval = date.timeIntervalSinceNow
-        if interval <= 0 { return "0m" }
-        let hours = Int(interval) / 3600
-        let minutes = (Int(interval) % 3600) / 60
-        if hours > 0 {
-            return "\(hours)h\(minutes)m"
-        } else {
-            return "\(minutes)m"
-        }
-    }
 }
 
 @MainActor
 class MenuBarState: ObservableObject {
     static let shared = MenuBarState()
-    @Published var sessionPercent: Int?
     @Published var weeklyPercent: Int?
-    @Published var fiveHourResetAt: Date?
     @Published var codexWeeklyPercent: Int?
     @Published var geminiSessionPercent: Int?
     @Published var grokWeeklyPercent: Int?
